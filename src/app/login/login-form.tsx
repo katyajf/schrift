@@ -11,7 +11,7 @@ async function loginAction(state: LoginState, formData: FormData): Promise<Login
 export function LoginForm({ linkError }: { linkError?: boolean }) {
   const [state, formAction, pending] = useActionState(loginAction, { step: "email" } as LoginState);
   const [email, setEmail] = useState("");
-  const error = state.error ?? (linkError && state.step === "email" ? "That sign-in link has expired. Request a new one." : undefined);
+  const error = state.error ?? (linkError && state.step === "email" ? "That link didn\u2019t work. Open it in the same browser you requested it from, or request a new one." : undefined);
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
@@ -38,7 +38,7 @@ export function LoginForm({ linkError }: { linkError?: boolean }) {
       ) : (
         <>
           <p className="text-sm text-muted">
-            Sent to <span className="text-ink">{state.email}</span>. Open the link, or enter the code from the email here.
+            Sent to <span className="text-ink">{state.email}</span>. Open the link in this browser on this device. If the email has a code, you can enter it here instead.
           </p>
           <label className="flex flex-col gap-2">
             <span className="text-sm text-muted">Code</span>

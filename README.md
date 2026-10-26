@@ -35,7 +35,7 @@ Built with Next.js 16 (App Router, Cache Components), Supabase (Postgres, Auth, 
      - `http://localhost:3000/**`
      - `https://<your-production-domain>/**`
      - `https://*-<your-vercel-team-slug>.vercel.app/**` (preview deployments)
-3. **Authentication → Emails → Templates → Magic link**: paste `supabase/templates/magic-link.html`. It contains both a link (token-hash flow, works across browsers) and a 6-digit code. The code matters on iPhone: a home-screen app doesn't share cookies with Safari, so you type the code into the app instead of tapping the link.
+3. *Optional, needs custom SMTP.* **Authentication → Emails → Templates → Magic link**: paste `supabase/templates/magic-link.html`. It contains both a link (token-hash flow, works across browsers) and a 6-digit code. The code matters on iPhone: a home-screen app doesn't share cookies with Safari, so you type the code into the app instead of tapping the link.
 4. Sign in once. Then **Authentication → Sign In / Providers → Email** and turn off **Allow new users to sign up**.
 5. Optional: the built-in email sender is rate-limited to a few emails per hour. That's fine for one person; add custom SMTP under Authentication → Emails if it gets in the way.
 
