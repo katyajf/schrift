@@ -1,26 +1,122 @@
 @import "tailwindcss";
 
+/* Design tokens. Light by default, dark via the system setting, and either can
+   be forced with <html data-theme="light|dark"> from Settings. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --paper: #faf7f2;
+  --card: #ffffff;
+  --sunken: #f2ede4;
+  --ink: #26231f;
+  --muted: #7d766b;
+  --line: #e6e0d5;
+  --line-strong: #d4ccbe;
+  --accent: #2e5e4e;
+  --accent-ink: #faf7f2;
+  --accent-soft: #e3ece7;
+  --de: #2f6690;
+  --de-soft: #e2ebf3;
+  --het: #b4572e;
+  --het-soft: #f6e6dd;
+  --warn: #8a5a00;
+  --warn-soft: #f8edd3;
+  --danger: #a33a2a;
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not([data-theme="light"]) {
+    --paper: #1b1a18;
+    --card: #24221f;
+    --sunken: #151412;
+    --ink: #ede8df;
+    --muted: #a39b8e;
+    --line: #34312c;
+    --line-strong: #46423b;
+    --accent: #7fb8a2;
+    --accent-ink: #12211c;
+    --accent-soft: #23332d;
+    --de: #8db8de;
+    --de-soft: #1f2b36;
+    --het: #e39a74;
+    --het-soft: #3a261c;
+    --warn: #e2b95a;
+    --warn-soft: #362c17;
+    --danger: #ef8f7f;
+    color-scheme: dark;
   }
 }
 
+:root[data-theme="dark"] {
+  --paper: #1b1a18;
+  --card: #24221f;
+  --sunken: #151412;
+  --ink: #ede8df;
+  --muted: #a39b8e;
+  --line: #34312c;
+  --line-strong: #46423b;
+  --accent: #7fb8a2;
+  --accent-ink: #12211c;
+  --accent-soft: #23332d;
+  --de: #8db8de;
+  --de-soft: #1f2b36;
+  --het: #e39a74;
+  --het-soft: #3a261c;
+  --warn: #e2b95a;
+  --warn-soft: #362c17;
+  --danger: #ef8f7f;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-sunken: var(--sunken);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-de: var(--de);
+  --color-de-soft: var(--de-soft);
+  --color-het: var(--het);
+  --color-het-soft: var(--het-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-dutch: var(--font-literata), ui-serif, Georgia, serif;
+}
+
+html {
+  background: var(--paper);
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+@layer components {
+  .field {
+    @apply w-full rounded-xl border border-line-strong bg-card px-4 py-3 text-base text-ink outline-none placeholder:text-muted/70 focus:border-accent;
+  }
+  .btn-primary {
+    @apply flex min-h-14 w-full items-center justify-center rounded-2xl bg-accent px-5 text-lg text-accent-ink transition active:scale-[0.99] disabled:opacity-60;
+  }
+  .btn-secondary {
+    @apply flex min-h-12 items-center justify-center gap-2 rounded-xl border border-line-strong bg-card px-4 text-ink transition active:bg-sunken disabled:opacity-60;
+  }
+  .btn-ghost {
+    @apply flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 text-muted transition active:bg-sunken;
+  }
+  .chip {
+    @apply inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-line-strong px-3.5 text-sm text-muted transition;
+  }
+  .chip[aria-pressed="true"] {
+    @apply border-accent bg-accent-soft text-ink;
+  }
 }
