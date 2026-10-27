@@ -4,6 +4,8 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { fromFsrsCard, scheduler, toFsrsCard, type Grade } from "@/lib/fsrs";
 import type { Json } from "@/lib/database.types";
+import { toSessionItems } from "./load-items";
+import type { SessionItem } from "./session";
 
 const GradeInput = z.object({
   cardId: z.uuid(),
@@ -55,4 +57,27 @@ export async function gradeCard(input: unknown): Promise<{ ok: true } | { ok: fa
     return { ok: false, error: "Couldn't save this answer." };
   }
   return { ok: true };
+}
+
+const MoreInput = z.object({
+  exclude: z.array(z.uuid()).max(2000),
+  count: z.number().int().min(1).max(50).default(10),
+});
+
+// "Add new words" at the end of a session: words you haven't studied yet,
+// beyond today's new-card limit, skipping cards already in this session.
+export async function loadNewCards(input: unknown): Promise<{ items: SessionItem[] } | { error: string }> {
+  const parsed = MoreInput.safeParse(input);
+  if (!parsed.success) return { error: "Invalid request." };
+  const { exclude, count } = parsed.data;
+  const { supabase } = await requireUser();
+
+  let query = supabase.rpc("eligible_new_cards").select("*");
+  if (exclude.length) query = query.not("id", "in", `(${exclude.join(",")})`);
+  const { data: cards, error } = await query.limit(count);
+  if (error) {
+    console.error("eligible_new_cards failed", error);
+    return { error: "Couldn't load new words." };
+  }
+  return { items: await toSessionItems(supabase, cards ?? []) };
 }

@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Loader2, Plus, Shuffle, X } from "lucide-react";
 import { AiBadge, DutchTerm } from "@/components/dutch-term";
 import { PlayButton } from "@/components/play-button";
 import { Rating, type CardFields, type Grade } from "@/lib/fsrs";
 import type { Article, Auxiliary, WordType } from "@/lib/database.types";
-import { gradeCard } from "./actions";
+import { gradeCard, loadNewCards } from "./actions";
 
 export type SessionItem = {
   card: CardFields & { id: string; kind: "recognise" | "produce" };
@@ -31,6 +31,12 @@ type GradeInput = { cardId: string; rating: Grade; expectedReps: number; duratio
 type SaveStatus = "saving" | "learned" | "error";
 
 export function Session({ items, streak, studiedToday }: { items: SessionItem[]; streak: number; studiedToday: boolean }) {
+  // The current round. "Go again" and "Add new words" replace it with a reshuffled one.
+  const [deck, setDeck] = useState(items);
+  const [round, setRound] = useState(1);
+  const [addingWords, setAddingWords] = useState(false);
+  const [addMessage, setAddMessage] = useState<string | null>(null);
+  const seenCardIds = useRef(new Set(items.map((i) => i.card.id)));
   const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [seenAnswers, setSeenAnswers] = useState<Set<string>>(new Set());
@@ -43,9 +49,9 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
   // Keep an immediate lock as well as rendered state to guard rapid double taps.
   const saveStatuses = useRef<Record<string, SaveStatus>>({});
   const inputs = useRef(new Map<string, GradeInput>());
-  const total = items.length;
-  const current = items[index];
-  const learned = items.filter((item) => statuses[item.card.id] === "learned").length;
+  const total = deck.length;
+  const current = deck[index];
+  const learned = deck.filter((item) => statuses[item.card.id] === "learned").length;
   const saveFailed = Object.values(statuses).filter((status) => status === "error").length;
   const saving = Object.values(statuses).some((status) => status === "saving");
 
@@ -204,17 +210,59 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
     return () => window.removeEventListener("keydown", onKey);
   }, [phase, current, index, total, move, flip]);
 
+  function startRound(cards: SessionItem[]) {
+    setDeck(shuffle(cards));
+    setIndex(0);
+    setRevealed(false);
+    setSeenAnswers(new Set());
+    setDragX(0);
+    setAddMessage(null);
+    setRound((r) => r + 1);
+    setPhase("cards");
+  }
+
+  // A card whose save is still in flight counts as learned.
+  const stillLearning = deck.filter((item) => !["learned", "saving"].includes(statuses[item.card.id]));
+
+  // Go again with what you haven't learned yet; if that's nothing, the whole round.
+  function goAgain() {
+    startRound(stillLearning.length ? stillLearning : deck);
+  }
+
+  async function addNewWords() {
+    setAddingWords(true);
+    setAddMessage(null);
+    try {
+      const result = await loadNewCards({ exclude: [...seenCardIds.current], count: 10 });
+      if ("error" in result) return setAddMessage(result.error);
+      if (!result.items.length) return setAddMessage("No new words left. Scan another notebook page to add more.");
+      result.items.forEach((item) => seenCardIds.current.add(item.card.id));
+      startRound([...stillLearning, ...result.items]);
+    } catch {
+      setAddMessage("Couldn't load new words. Check your connection.");
+    } finally {
+      setAddingWords(false);
+    }
+  }
+
   if (phase !== "cards" || !current) {
+    const sessionLearned = Object.values(statuses).filter((s) => s === "learned").length;
     return (
       <Summary
         saving={phase === "saving" || saving}
         learned={learned}
         remaining={total - learned}
         minutes={minutes}
-        streak={studiedToday || learned === 0 ? streak : streak + 1}
+        streak={studiedToday || sessionLearned === 0 ? streak : streak + 1}
         saveFailed={saveFailed}
         onRetry={retryFailed}
-        onBack={total > 0 ? () => setPhase("cards") : undefined}
+        onBack={index < total - 1 ? () => setPhase("cards") : undefined}
+        onAgain={goAgain}
+        againCount={stillLearning.length || total}
+        onAddWords={addNewWords}
+        addingWords={addingWords}
+        addMessage={addMessage}
+        round={round}
       />
     );
   }
@@ -396,6 +444,12 @@ function Summary({
   saveFailed,
   onRetry,
   onBack,
+  onAgain,
+  againCount,
+  onAddWords,
+  addingWords,
+  addMessage,
+  round,
 }: {
   saving: boolean;
   learned: number;
@@ -405,12 +459,20 @@ function Summary({
   saveFailed: number;
   onRetry: () => void;
   onBack?: () => void;
+  onAgain: () => void;
+  againCount: number;
+  onAddWords: () => void;
+  addingWords: boolean;
+  addMessage: string | null;
+  round: number;
 }) {
   return (
     <main className="flex flex-1 flex-col justify-end gap-8 px-6 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div>
         <h1 className="font-dutch text-4xl">Goed gedaan</h1>
-        <p className="mt-2 text-muted">{saving ? "Saving your progress…" : remaining === 0 ? "Session complete." : "Your session so far."}</p>
+        <p className="mt-2 text-muted">
+          {saving ? "Saving your progress…" : remaining === 0 ? `Round ${round} done — every card learned.` : `Round ${round} done.`}
+        </p>
       </div>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-5">
         <SummaryStat label={learned === 1 ? "card learned" : "cards learned"} value={learned} />
@@ -425,15 +487,31 @@ function Summary({
           {saveFailed} {saveFailed === 1 ? "card wasn't" : "cards weren't"} saved. Tap to retry.
         </button>
       )}
+      {addMessage && (
+        <p role="alert" className="text-sm text-muted">
+          {addMessage}
+        </p>
+      )}
       <div className="flex flex-col gap-3">
-        {onBack && <button type="button" onClick={onBack} className="btn-secondary" disabled={saving}>Back to cards</button>}
+        {onBack && (
+          <button type="button" onClick={onBack} className="btn-ghost">
+            Back to cards
+          </button>
+        )}
+        <button type="button" onClick={onAgain} className="btn-primary gap-2">
+          <Shuffle className="size-5" aria-hidden /> Go again ({againCount} {againCount === 1 ? "card" : "cards"}, shuffled)
+        </button>
+        <button type="button" onClick={onAddWords} className="btn-secondary" disabled={addingWords}>
+          {addingWords ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Plus className="size-5" aria-hidden />}
+          {addingWords ? "Loading words…" : "Add 10 new words"}
+        </button>
         {saving ? (
-          <div className="btn-primary gap-2 opacity-70" role="status">
-            <Loader2 className="size-5 animate-spin" aria-hidden /> Saving…
+          <div className="btn-ghost gap-2" role="status">
+            <Loader2 className="size-4 animate-spin" aria-hidden /> Saving…
           </div>
         ) : (
-          <Link href="/" className="btn-primary">
-            {saveFailed > 0 ? "Leave without saving" : "Done"}
+          <Link href="/" className="btn-ghost">
+            {saveFailed > 0 ? "Leave without saving" : "Done for now"}
           </Link>
         )}
       </div>
@@ -448,4 +526,14 @@ function SummaryStat({ label, value }: { label: string; value: number | string }
       <dt className="text-sm text-muted">{label}</dt>
     </div>
   );
+}
+
+// Fisher–Yates; only ever called from button handlers, never during render.
+function shuffle<T>(list: T[]): T[] {
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }

@@ -201,6 +201,7 @@ export type Database = {
         }[];
       };
       session_cards: { Args: { p_free?: boolean }; Returns: CardRow[] };
+      eligible_new_cards: { Args: Record<string, never>; Returns: CardRow[] };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };
