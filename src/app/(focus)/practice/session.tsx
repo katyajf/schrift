@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Loader2, RotateCw, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { AiBadge, DutchTerm } from "@/components/dutch-term";
 import { PlayButton } from "@/components/play-button";
 import { Rating, type CardFields, type Grade } from "@/lib/fsrs";
@@ -247,34 +247,34 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
         {status === "error" && (
           <p role="alert" className="mb-2 text-center text-sm text-danger">Couldn’t save this card. Try again.</p>
         )}
-        {/* Secondary action: outlined, so moving between cards stays the main thing. */}
-        <button
-          type="button"
-          className={`flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border text-sm transition active:bg-sunken disabled:opacity-50 ${
-            status === "learned" ? "border-accent bg-accent-soft text-ink" : "border-accent/60 text-accent"
-          }`}
-          onClick={markLearned}
-          disabled={!checkedAnswer || status === "saving" || status === "learned"}
-        >
-          {status === "saving" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Check className="size-4" aria-hidden />}
-          {status === "saving" ? "Saving…" : status === "learned" ? "Learned" : status === "error" ? "Retry saving" : "Mark as learned"}
-        </button>
-        <p role="status" className="mt-1.5 text-center text-xs text-muted">
-          {status === "learned" ? "Saved. This card will come back for review." : !checkedAnswer ? "Flip the card to check the answer first." : "Still learning? Move on and come back to it."}
+        {/* Screen-reader hint; the card itself says "Tap to see the answer". */}
+        <p role="status" className="sr-only">
+          {status === "learned" ? "Saved. This card will come back for review." : !checkedAnswer ? "Flip the card to check the answer first." : ""}
         </p>
-        <nav aria-label="Card navigation" className="mt-3 grid grid-cols-3 gap-2">
-          <button type="button" className="btn-secondary min-h-13 text-ink disabled:opacity-35" onClick={() => move(-1)} disabled={index === 0}>
+        <nav aria-label="Card navigation" className="grid grid-cols-3 gap-2">
+          <button type="button" className="btn-secondary min-h-14 text-ink disabled:opacity-35" onClick={() => move(-1)} disabled={index === 0}>
             <ChevronLeft className="size-5" aria-hidden /> Previous
           </button>
-          <button type="button" className="btn-secondary min-h-13 text-ink" onClick={flip} aria-label="Flip card">
-            <RotateCw className="size-4" aria-hidden /> Flip
+          {/* Available once you've seen the answer; tap the card to flip it. */}
+          <button
+            type="button"
+            className={`flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-xl border px-1 text-center text-sm leading-tight transition active:bg-sunken disabled:opacity-40 ${
+              status === "learned" ? "border-accent bg-accent-soft text-ink" : "border-accent text-accent"
+            }`}
+            onClick={markLearned}
+            aria-label={status === "learned" ? "Learned" : "Mark as learned"}
+            disabled={!checkedAnswer || status === "saving" || status === "learned"}
+          >
+            {status === "saving" && <Loader2 className="size-4 animate-spin" aria-hidden />}
+            {status === "learned" && <Check className="size-4" aria-hidden />}
+            {status === "saving" ? "Saving…" : status === "error" ? "Retry" : "Learned"}
           </button>
           {index < total - 1 ? (
-            <button type="button" className="btn-secondary min-h-13 text-ink" onClick={() => move(1)}>
+            <button type="button" className="btn-secondary min-h-14 text-ink" onClick={() => move(1)}>
               Next <ChevronRight className="size-5" aria-hidden />
             </button>
           ) : (
-            <button type="button" className="btn-secondary min-h-13 border-accent text-accent" onClick={finish}>
+            <button type="button" className="btn-secondary min-h-14 border-accent text-accent" onClick={finish}>
               Finish <Check className="size-5" aria-hidden />
             </button>
           )}
