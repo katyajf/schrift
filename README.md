@@ -49,6 +49,7 @@ Set these in **Vercel → Project → Settings → Environment Variables** (Prod
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | the `sb_publishable_…` key (the legacy anon key also works) | yes (safe, RLS protects data) |
 | `GEMINI_API_KEY` | Google AI Studio → API keys | **no**, server only |
 | `GEMINI_MODEL` | optional, defaults to `gemini-3.8-flash` | no |
+| `GEMINI_FALLBACK_MODEL` | optional, used when the main model is overloaded; defaults to `gemini-3.6-flash` | no |
 | `ALLOWED_EMAIL` | your email, the only one allowed to sign in | no |
 
 No Supabase service-role key is needed: every query runs as you, and RLS restricts it to your rows.

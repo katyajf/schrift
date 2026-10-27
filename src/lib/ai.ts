@@ -7,8 +7,27 @@ import { ExtractionResultSchema, type ExtractedEntry } from "@/lib/entry-schema"
 // calls these functions, so swapping providers means rewriting this file only.
 
 const DEFAULT_MODEL = "gemini-3.8-flash";
+// Used when the main model is overloaded (503) or out of quota (429).
+const DEFAULT_FALLBACK_MODEL = "gemini-3.6-flash";
 
 export const aiModel = () => process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL;
+
+function modelsToTry() {
+  const fallback = process.env.GEMINI_FALLBACK_MODEL?.trim() || DEFAULT_FALLBACK_MODEL;
+  return [...new Set([aiModel(), fallback])];
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function statusOf(error: unknown) {
+  return error && typeof error === "object" && "status" in error ? (error as { status?: number }).status : undefined;
+}
+
+// Errors where waiting or switching model can help.
+function isTransient(error: unknown) {
+  const status = statusOf(error);
+  return status === 429 || status === 500 || status === 503 || status === 504;
+}
 
 let client: GoogleGenAI | null = null;
 function gemini() {
@@ -61,35 +80,54 @@ export async function extractEntriesFromImage(image: {
   data: Uint8Array;
   mimeType: string;
 }): Promise<{ entries: ExtractedEntry[]; model: string }> {
-  const model = aiModel();
   const base64 = Buffer.from(image.data).toString("base64");
 
-  // One retry: structured output makes a malformed response rare, but the
-  // model can still occasionally return something zod rejects.
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const response = await gemini().models.generateContent({
-        model,
-        contents: [
-          { inlineData: { mimeType: image.mimeType, data: base64 } },
-          { text: EXTRACTION_PROMPT },
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseJsonSchema: EXTRACTION_SCHEMA,
-          temperature: 0.1,
-        },
-      });
+  return withRetries(async (model) => {
+    const response = await gemini().models.generateContent({
+      model,
+      contents: [
+        { inlineData: { mimeType: image.mimeType, data: base64 } },
+        { text: EXTRACTION_PROMPT },
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseJsonSchema: EXTRACTION_SCHEMA,
+        temperature: 0.1,
+      },
+    });
 
-      const text = response.text;
-      if (!text) throw new AiError("The model returned an empty response.");
-      const parsed = ExtractionResultSchema.parse(JSON.parse(text));
-      return { entries: parsed.entries.map(cleanEntry), model };
-    } catch (error) {
-      lastError = error;
-      if (!(error instanceof z.ZodError || error instanceof SyntaxError)) break;
+    const text = response.text;
+    if (!text) throw new AiError("The model returned an empty response.");
+    const parsed = ExtractionResultSchema.parse(JSON.parse(text));
+    return { entries: parsed.entries.map(cleanEntry), model };
+  });
+}
+
+// Tries the main model a few times with backoff when Gemini is busy, then the
+// fallback model. A malformed answer (rare with structured output) is retried once.
+// Kept well inside the route's 60s limit: busy errors come back within a second.
+async function withRetries<T>(call: (model: string) => Promise<T>): Promise<T> {
+  const BACKOFF_MS = [1500, 4000];
+  let lastError: unknown;
+
+  for (const model of modelsToTry()) {
+    let malformedRetries = 1;
+    for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt++) {
+      try {
+        return await call(model);
+      } catch (error) {
+        lastError = error;
+        if ((error instanceof z.ZodError || error instanceof SyntaxError) && malformedRetries-- > 0) continue;
+        if (isTransient(error) && attempt < BACKOFF_MS.length) {
+          console.warn(`Gemini ${model} returned ${statusOf(error)}, retrying`);
+          await sleep(BACKOFF_MS[attempt]);
+          continue;
+        }
+        break;
+      }
     }
+    // Only move on to the fallback when the problem is the model being unavailable.
+    if (!isTransient(lastError) && statusOf(lastError) !== 404) break;
   }
   throw new AiError(describeError(lastError));
 }
@@ -112,11 +150,11 @@ function describeError(error: unknown): string {
   if (error instanceof AiError) return error.message;
   if (error instanceof z.ZodError) return "The model's answer didn't match the expected format.";
   if (error instanceof SyntaxError) return "The model's answer wasn't valid JSON.";
-  if (error && typeof error === "object" && "status" in error) {
-    const status = (error as { status?: number }).status;
-    if (status === 429) return "Gemini rate limit reached. Try again in a minute.";
-    if (status === 400) return "Gemini rejected the request. Check GEMINI_MODEL and the image.";
-    if (status === 401 || status === 403) return "Gemini rejected the API key.";
-  }
+  const status = statusOf(error);
+  if (status === 503 || status === 500 || status === 504) return "Gemini is busy right now. Tap retry in a minute.";
+  if (status === 429) return "Gemini rate limit reached. Tap retry in a minute.";
+  if (status === 404) return "Gemini model not found. Check GEMINI_MODEL.";
+  if (status === 400) return "Gemini rejected the request. Check GEMINI_MODEL and the image.";
+  if (status === 401 || status === 403) return "Gemini rejected the API key.";
   return error instanceof Error ? error.message : "The AI request failed.";
 }
