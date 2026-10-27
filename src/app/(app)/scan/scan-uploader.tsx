@@ -53,7 +53,11 @@ export function ScanUploader({
     try {
       const res = await fetch(`/api/pages/${id}/extract`, { method: "POST" });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error ?? "Couldn't read this page.");
+      if (!res.ok) {
+        // A non-JSON 504 means the platform cut the request off.
+        const fallback = res.status === 504 ? "Reading took too long. Tap retry." : `Couldn't read this page (error ${res.status}).`;
+        throw new Error(body.error ?? fallback);
+      }
       update(id, { status: "review", count: body.count });
       files.current.delete(id);
     } catch (error) {

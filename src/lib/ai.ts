@@ -76,13 +76,14 @@ Rules:
 - Set "unsure" to true when you had to guess at the handwriting.
 - If the page has no vocabulary, return an empty list.`;
 
-export async function extractEntriesFromImage(image: {
-  data: Uint8Array;
-  mimeType: string;
-}): Promise<{ entries: ExtractedEntry[]; model: string }> {
+export async function extractEntriesFromImage(
+  image: { data: Uint8Array; mimeType: string },
+  // Epoch ms by which we must give up, so the caller can still save a result.
+  { deadline = Date.now() + 240_000 }: { deadline?: number } = {},
+): Promise<{ entries: ExtractedEntry[]; model: string }> {
   const base64 = Buffer.from(image.data).toString("base64");
 
-  return withRetries(async (model) => {
+  return withRetries(deadline, async (model, abortSignal) => {
     const response = await gemini().models.generateContent({
       model,
       contents: [
@@ -93,6 +94,7 @@ export async function extractEntriesFromImage(image: {
         responseMimeType: "application/json",
         responseJsonSchema: EXTRACTION_SCHEMA,
         temperature: 0.1,
+        abortSignal,
       },
     });
 
@@ -105,17 +107,28 @@ export async function extractEntriesFromImage(image: {
 
 // Tries the main model a few times with backoff when Gemini is busy, then the
 // fallback model. A malformed answer (rare with structured output) is retried once.
-// Kept well inside the route's 60s limit: busy errors come back within a second.
-async function withRetries<T>(call: (model: string) => Promise<T>): Promise<T> {
+// Every call is cut off at the deadline, and no new attempt starts without
+// enough time left, so the caller always gets an answer it can save.
+async function withRetries<T>(
+  deadline: number,
+  call: (model: string, signal: AbortSignal) => Promise<T>,
+): Promise<T> {
   const BACKOFF_MS = [1500, 4000];
-  let lastError: unknown;
+  const MIN_TIME_FOR_A_CALL_MS = 20_000;
+  let lastError: unknown = new AiError("Gemini took too long. Tap retry.");
 
-  for (const model of modelsToTry()) {
+  outer: for (const model of modelsToTry()) {
     let malformedRetries = 1;
     for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt++) {
+      const remaining = deadline - Date.now();
+      if (remaining < MIN_TIME_FOR_A_CALL_MS) break outer;
       try {
-        return await call(model);
+        return await call(model, AbortSignal.timeout(remaining));
       } catch (error) {
+        if (isTimeout(error)) {
+          lastError = new AiError("Gemini took too long. Tap retry.");
+          break outer;
+        }
         lastError = error;
         if ((error instanceof z.ZodError || error instanceof SyntaxError) && malformedRetries-- > 0) continue;
         if (isTransient(error) && attempt < BACKOFF_MS.length) {
@@ -130,6 +143,10 @@ async function withRetries<T>(call: (model: string) => Promise<T>): Promise<T> {
     if (!isTransient(lastError) && statusOf(lastError) !== 404) break;
   }
   throw new AiError(describeError(lastError));
+}
+
+function isTimeout(error: unknown) {
+  return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
 }
 
 function cleanEntry(entry: ExtractedEntry): ExtractedEntry {

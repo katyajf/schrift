@@ -5,13 +5,17 @@ import { dutchKey } from "@/lib/dutch";
 import type { Match, PageExtraction } from "@/lib/entry-schema";
 import type { Json } from "@/lib/database.types";
 
-// Reading a page of handwriting can take a while on the larger models.
-export const maxDuration = 60;
+// Reading handwriting can take a minute, more with retries when Gemini is busy.
+// 300s is the most Vercel's Hobby plan allows.
+export const maxDuration = 300;
+// Stop trying well before that, so the page always ends up "review" or "failed".
+const AI_BUDGET_MS = 240_000;
 
 export async function POST(_request: Request, ctx: RouteContext<"/api/pages/[id]/extract">) {
   const user = await getUserOrNull();
   if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   const { supabase } = user;
+  const startedAt = Date.now();
   const { id } = await ctx.params;
 
   const { data: page } = await supabase.from("pages").select("id, storage_path, status").eq("id", id).maybeSingle();
@@ -24,10 +28,10 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/pages/[id]
     const { data: file, error: downloadError } = await supabase.storage.from("pages").download(page.storage_path);
     if (downloadError || !file) throw new AiError("Couldn't load the photo from storage.");
 
-    const { entries, model } = await extractEntriesFromImage({
-      data: new Uint8Array(await file.arrayBuffer()),
-      mimeType: file.type || "image/jpeg",
-    });
+    const { entries, model } = await extractEntriesFromImage(
+      { data: new Uint8Array(await file.arrayBuffer()), mimeType: file.type || "image/jpeg" },
+      { deadline: startedAt + AI_BUDGET_MS },
+    );
 
     const extraction: PageExtraction = { model, entries, matches: await findMatches(supabase, entries) };
     await supabase
