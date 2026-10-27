@@ -105,6 +105,17 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
   const suppressTap = useRef(false);
   const SWIPE_THRESHOLD = 80;
 
+  // Slide the current card off-screen, then show the neighbouring one.
+  function slideTo(direction: -1 | 1) {
+    setSettling(true);
+    setDragX(-direction * window.innerWidth);
+    setTimeout(() => {
+      move(direction);
+      setDragX(0);
+      setSettling(false);
+    }, 180);
+  }
+
   const swipeHandlers = {
     onPointerDown(event: React.PointerEvent<HTMLElement>) {
       if (settling || (event.pointerType === "mouse" && event.button !== 0)) return;
@@ -137,13 +148,7 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
       const direction = dragX <= -SWIPE_THRESHOLD ? 1 : dragX >= SWIPE_THRESHOLD ? -1 : 0;
       const canMove = (direction === 1 && index < total - 1) || (direction === -1 && index > 0);
       if (!canMove) return setDragX(0);
-      setSettling(true);
-      setDragX(-direction * window.innerWidth);
-      setTimeout(() => {
-        move(direction as -1 | 1);
-        setDragX(0);
-        setSettling(false);
-      }, 180);
+      slideTo(direction as -1 | 1);
     },
     onPointerCancel() {
       drag.current = null;
@@ -163,7 +168,7 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
   }, []);
 
   function markLearned() {
-    if (!current || !seenAnswers.has(current.card.id)) return;
+    if (!current || !seenAnswers.has(current.card.id) || settling) return;
     const previousInput = inputs.current.get(current.card.id);
     save(previousInput ?? {
       cardId: current.card.id,
@@ -172,6 +177,10 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
       expectedReps: current.card.reps,
       durationMs: Math.min(3_600_000, Math.max(0, Date.now() - shownAt.current)),
     });
+    // Don't wait for the save: it carries on in the background, and the
+    // summary waits for any that are still running.
+    if (index < total - 1) slideTo(1);
+    else finish();
   }
 
   useEffect(() => {
