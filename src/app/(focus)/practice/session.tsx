@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, ChevronLeft, ChevronRight, Loader2, RotateCw, X } from "lucide-react";
 import { AiBadge, DutchTerm } from "@/components/dutch-term";
 import { PlayButton } from "@/components/play-button";
-import { formatInterval, fromFsrsCard, GRADES, Rating, scheduler, toFsrsCard, type CardFields, type Grade } from "@/lib/fsrs";
+import { Rating, type CardFields, type Grade } from "@/lib/fsrs";
 import type { Article, Auxiliary, WordType } from "@/lib/database.types";
 import { gradeCard } from "./actions";
 
@@ -28,24 +28,26 @@ export type SessionItem = {
 
 type GradeInput = { cardId: string; rating: Grade; expectedReps: number; durationMs: number | null };
 
-// Cards whose next step is within this window come back later in the same session.
-const REQUEUE_WITHIN_MS = 60 * 60_000;
-const REQUEUE_GAP = 4;
+type SaveStatus = "saving" | "learned" | "error";
 
 export function Session({ items, streak, studiedToday }: { items: SessionItem[]; streak: number; studiedToday: boolean }) {
-  const [queue, setQueue] = useState(items);
+  const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
+  const [seenAnswers, setSeenAnswers] = useState<Set<string>>(new Set());
+  const [statuses, setStatuses] = useState<Record<string, SaveStatus>>({});
   const [phase, setPhase] = useState<"cards" | "saving" | "summary">("cards");
-  const [finished, setFinished] = useState(0);
-  const [stats, setStats] = useState({ answers: 0, again: 0, newWords: new Set<string>() });
-  const [saveFailed, setSaveFailed] = useState(0);
   const [minutes, setMinutes] = useState(1);
   const shownAt = useRef(0);
   const startedAt = useRef(0);
   const saveChain = useRef<Promise<void>>(Promise.resolve());
-  const failed = useRef<GradeInput[]>([]);
+  // Keep an immediate lock as well as rendered state to guard rapid double taps.
+  const saveStatuses = useRef<Record<string, SaveStatus>>({});
+  const inputs = useRef(new Map<string, GradeInput>());
   const total = items.length;
-  const current = queue[0];
+  const current = items[index];
+  const learned = items.filter((item) => statuses[item.card.id] === "learned").length;
+  const saveFailed = Object.values(statuses).filter((status) => status === "error").length;
+  const saving = Object.values(statuses).some((status) => status === "saving");
 
   useEffect(() => {
     const now = Date.now();
@@ -53,199 +55,220 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
     shownAt.current = now;
   }, [current]);
 
-  // Answers are saved one at a time, in order, without blocking the next card.
   const save = useCallback((input: GradeInput) => {
+    if (["saving", "learned"].includes(saveStatuses.current[input.cardId])) return;
+    inputs.current.set(input.cardId, input);
+    const updateStatus = (status: SaveStatus) => {
+      saveStatuses.current[input.cardId] = status;
+      setStatuses((previous) => ({ ...previous, [input.cardId]: status }));
+    };
+    updateStatus("saving");
+    // Preserve the existing server action's ordered, idempotent review saving.
     saveChain.current = saveChain.current.then(async () => {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const result = await gradeCard(input);
-          if (result.ok) return;
+          if (result.ok) {
+            updateStatus("learned");
+            return;
+          }
         } catch {}
-        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
       }
-      failed.current.push(input);
-      setSaveFailed(failed.current.length);
+      updateStatus("error");
     });
   }, []);
 
   function retryFailed() {
-    const toRetry = failed.current.splice(0);
-    setSaveFailed(0);
-    toRetry.forEach(save);
+    for (const [cardId, input] of inputs.current) {
+      if (saveStatuses.current[cardId] === "error") save(input);
+    }
   }
 
-  // Interval shown under each button, from the same scheduler the server uses.
-  // Only computed once the answer is shown, so the server render never reads the clock.
-  const previews = useMemo(() => {
-    if (!current || !revealed) return null;
-    const now = new Date();
-    const preview = scheduler.repeat(toFsrsCard(current.card), now);
-    return Object.fromEntries(GRADES.map((g) => [g.rating, formatInterval(now, preview[g.rating].card.due)])) as Record<Grade, string>;
-  }, [current, revealed]);
+  const flip = useCallback(() => {
+    if (!current) return;
+    setRevealed((previous) => !previous);
+    setSeenAnswers((previous) => new Set(previous).add(current.card.id));
+  }, [current]);
 
-  const grade = useCallback(
-    (rating: Grade) => {
-      if (!current || !revealed) return;
-      const now = new Date();
-      const next = scheduler.next(toFsrsCard(current.card), now, rating).card;
+  const move = useCallback((direction: -1 | 1) => {
+    setIndex((previous) => Math.max(0, Math.min(total - 1, previous + direction)));
+    setRevealed(false);
+  }, [total]);
 
-      save({
-        cardId: current.card.id,
-        rating,
-        expectedReps: current.card.reps,
-        durationMs: Math.round(now.getTime() - shownAt.current),
-      });
+  const finish = useCallback(() => {
+    setMinutes(Math.max(1, Math.round((Date.now() - startedAt.current) / 60_000)));
+    setPhase("saving");
+    saveChain.current.then(() => setPhase("summary"));
+  }, []);
 
-      setStats((s) => ({
-        answers: s.answers + 1,
-        again: s.again + (rating === Rating.Again ? 1 : 0),
-        newWords: current.card.state === 0 ? new Set(s.newWords).add(current.entry.id) : s.newWords,
-      }));
+  function markLearned() {
+    if (!current || !seenAnswers.has(current.card.id)) return;
+    const previousInput = inputs.current.get(current.card.id);
+    save(previousInput ?? {
+      cardId: current.card.id,
+      // A learned card graduates to review; it is not removed permanently.
+      rating: Rating.Easy,
+      expectedReps: current.card.reps,
+      durationMs: Math.min(3_600_000, Math.max(0, Date.now() - shownAt.current)),
+    });
+  }
 
-      const rest = queue.slice(1);
-      if (next.due.getTime() - now.getTime() < REQUEUE_WITHIN_MS) {
-        const again = { ...current, card: { ...current.card, ...fromFsrsCard(next) } };
-        rest.splice(Math.min(REQUEUE_GAP, rest.length), 0, again);
-      } else {
-        setFinished((f) => f + 1);
-      }
-
-      setRevealed(false);
-      setQueue(rest);
-      if (rest.length === 0) {
-        setMinutes(Math.max(1, Math.round((now.getTime() - startedAt.current) / 60_000)));
-        setPhase("saving");
-        saveChain.current.then(() => setPhase("summary"));
-      }
-    },
-    [current, revealed, queue, save],
-  );
-
-  // Space/Enter to reveal, 1–4 to grade (for a laptop keyboard).
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (phase !== "cards") return;
-      if (!revealed && (e.key === " " || e.key === "Enter")) {
-        e.preventDefault();
-        setRevealed(true);
-      } else if (revealed && ["1", "2", "3", "4"].includes(e.key)) {
-        grade(Number(e.key) as Grade);
+    function onKey(event: KeyboardEvent) {
+      if (phase !== "cards" || !current || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable=true]")) return;
+      if (event.key === "ArrowLeft" && index > 0) {
+        event.preventDefault();
+        move(-1);
+      } else if (event.key === "ArrowRight" && index < total - 1) {
+        event.preventDefault();
+        move(1);
+      } else if ((event.key === " " || event.key === "Enter") &&
+        !(target instanceof HTMLElement && target.closest("button, a"))) {
+        event.preventDefault();
+        flip();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase, revealed, grade]);
+  }, [phase, current, index, total, move, flip]);
 
-  if (phase !== "cards") {
+  if (phase !== "cards" || !current) {
     return (
       <Summary
-        saving={phase === "saving"}
-        answers={stats.answers}
-        again={stats.again}
-        newWords={stats.newWords.size}
+        saving={phase === "saving" || saving}
+        learned={learned}
+        remaining={total - learned}
         minutes={minutes}
-        streak={studiedToday ? streak : streak + 1}
+        streak={studiedToday || learned === 0 ? streak : streak + 1}
         saveFailed={saveFailed}
         onRetry={retryFailed}
+        onBack={total > 0 ? () => setPhase("cards") : undefined}
       />
     );
   }
 
+  const status = statuses[current.card.id];
+  const checkedAnswer = seenAnswers.has(current.card.id);
+
   return (
     <main className="flex flex-1 flex-col">
       <header className="px-5 pt-[max(1rem,env(safe-area-inset-top))]">
-        <div className="h-[3px] overflow-hidden rounded-full bg-line" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={finished}>
-          <div className="h-full rounded-full bg-accent transition-[width] duration-300" style={{ width: `${(finished / total) * 100}%` }} />
+        <div className="h-[3px] overflow-hidden rounded-full bg-line" role="progressbar" aria-label="Cards learned" aria-valuemin={0} aria-valuemax={total} aria-valuenow={learned}>
+          <div className="h-full rounded-full bg-accent transition-[width] duration-300" style={{ width: `${(learned / total) * 100}%` }} />
         </div>
         <div className="flex items-center justify-between pt-1 text-xs text-muted">
-          <span className="tabular-nums">
-            {finished} / {total}
-          </span>
-          <Link href="/" className="-mr-2 flex size-10 items-center justify-center" aria-label="End session">
+          <span className="tabular-nums" aria-live="polite">Card {index + 1} of {total}</span>
+          <span aria-live="polite">{learned} learned</span>
+          <button type="button" onClick={finish} className="-mr-2 flex size-10 items-center justify-center" aria-label="End session">
             <X className="size-5" aria-hidden />
-          </Link>
+          </button>
         </div>
-        {saveFailed > 0 && (
+        {saveFailed > 0 && status !== "error" && (
           <button onClick={retryFailed} className="mt-1 w-full rounded-lg bg-warn-soft px-3 py-2 text-left text-sm">
-            {saveFailed} {saveFailed === 1 ? "answer wasn't" : "answers weren't"} saved. Tap to retry.
+            {saveFailed} {saveFailed === 1 ? "card wasn't" : "cards weren't"} saved. Tap to retry.
           </button>
         )}
       </header>
 
-      <CardFace key={`${current.card.id}-${current.card.reps}`} item={current} revealed={revealed} />
+      <CardFace key={current.card.id} item={current} revealed={revealed} onFlip={flip} />
 
-      <div className="sticky bottom-0 bg-paper px-4 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-        {revealed ? (
-          <div className="grid grid-cols-4 gap-2">
-            {GRADES.map((g) => (
-              <button
-                key={g.rating}
-                onClick={() => grade(g.rating)}
-                className={`flex min-h-16 flex-col items-center justify-center rounded-2xl border bg-card active:bg-sunken ${
-                  g.rating === Rating.Good ? "border-accent" : "border-line-strong"
-                }`}
-              >
-                <span>{g.label}</span>
-                <span className="text-xs text-muted tabular-nums">{previews?.[g.rating]}</span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <button className="btn-primary min-h-16" onClick={() => setRevealed(true)}>
-            Show answer
-          </button>
+      <div className="sticky bottom-0 bg-paper px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+        {status === "error" && (
+          <p role="alert" className="mb-2 text-center text-sm text-danger">Couldn’t save this card. Try again.</p>
         )}
+        <button
+          type="button"
+          className="btn-primary gap-2"
+          onClick={markLearned}
+          disabled={!checkedAnswer || status === "saving" || status === "learned"}
+        >
+          {status === "saving" ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Check className="size-5" aria-hidden />}
+          {status === "saving" ? "Saving…" : status === "learned" ? "Learned" : status === "error" ? "Retry saving" : "Mark as learned"}
+        </button>
+        <p role="status" className="mt-2 text-center text-xs text-muted">
+          {status === "learned" ? "Saved. This card will come back for review." : !checkedAnswer ? "Flip the card to check the answer first." : "Still learning? Move on and come back to it."}
+        </p>
+        <nav aria-label="Card navigation" className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+          <button type="button" className="btn-ghost justify-start px-0 disabled:opacity-40" onClick={() => move(-1)} disabled={index === 0}>
+            <ChevronLeft className="size-5" aria-hidden /> Previous
+          </button>
+          <button type="button" className="btn-secondary" onClick={flip} aria-label="Flip card">
+            <RotateCw className="size-4" aria-hidden /> Flip
+          </button>
+          {index < total - 1 ? (
+            <button type="button" className="btn-ghost justify-end px-0" onClick={() => move(1)}>
+              Next <ChevronRight className="size-5" aria-hidden />
+            </button>
+          ) : (
+            <button type="button" className="btn-ghost justify-end px-0 text-accent" onClick={finish}>
+              Finish <Check className="size-5" aria-hidden />
+            </button>
+          )}
+        </nav>
       </div>
     </main>
   );
 }
 
-function CardFace({ item, revealed }: { item: SessionItem; revealed: boolean }) {
+function CardFace({ item, revealed, onFlip }: { item: SessionItem; revealed: boolean; onFlip: () => void }) {
   const { entry, card, example } = item;
   const spoken = entry.article ? `${entry.article} ${entry.dutch}` : entry.dutch;
-  const recognise = card.kind === "recognise";
-
-  const dutch = (
-    <div className="flex items-start gap-1">
-      <h1 className="text-[2.5rem] leading-[1.15] break-words">
-        <DutchTerm dutch={entry.dutch} article={entry.article} />
-      </h1>
-      <PlayButton text={spoken} className="mt-1" />
-    </div>
-  );
+  const showDutch = (card.kind === "recognise") !== revealed;
+  const flipLabel = showDutch ? "Show meaning" : "Show Dutch word";
 
   return (
-    <section className="flex flex-1 flex-col justify-center px-7 py-6">
-      <p className="mb-3 text-xs tracking-wide text-muted">{recognise ? "Dutch → English" : "English → Dutch"}</p>
-
-      {recognise ? (
-        dutch
-      ) : (
-        <>
-          <h1 className="text-3xl leading-snug">{entry.english}</h1>
-          {!revealed && <p className="mt-2 text-sm text-muted">{entry.word_type === "noun" ? "noun — with de or het" : entry.word_type}</p>}
-        </>
-      )}
-
-      {revealed && (
-        <div className="mt-6 border-t border-line pt-5">
-          {recognise ? <p className="text-2xl">{entry.english}</p> : dutch}
-          <Grammar entry={entry} />
-          {example && (
-            <div className="mt-5">
-              <div className="flex items-start gap-1">
-                <p className="font-dutch text-lg leading-snug text-ink/80">{example.dutch}</p>
-                <PlayButton text={example.dutch} size="sm" />
+    <section aria-label="Flashcard" className="flex flex-1 px-5 py-4">
+      <div className="relative flex min-h-64 min-w-0 flex-1 flex-col rounded-3xl border border-line bg-card">
+        <button
+          type="button"
+          className="absolute inset-0 rounded-3xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+          onClick={onFlip}
+          aria-label={flipLabel}
+          aria-pressed={revealed}
+          aria-controls="flashcard-content"
+        />
+        <div id="flashcard-content" aria-live="polite" className="pointer-events-none relative flex flex-1 flex-col p-6">
+          <div className="flex items-center justify-between text-xs tracking-wide text-muted">
+            <span>{showDutch ? "Dutch" : "English"}</span>
+            <span>{revealed ? "Answer" : "Question"}</span>
+          </div>
+          <div className="flex flex-1 flex-col justify-center py-8">
+            {showDutch ? (
+              <div className="flex items-start gap-2">
+                <h1 className="min-w-0 text-[2.5rem] leading-[1.15] break-words">
+                  <DutchTerm dutch={entry.dutch} article={entry.article} />
+                </h1>
+                <span className="pointer-events-auto shrink-0"><PlayButton text={spoken} className="mt-1" /></span>
               </div>
-              {example.english && (
-                <p className="text-sm text-muted">
-                  {example.english} {example.ai && <AiBadge />}
-                </p>
-              )}
-            </div>
-          )}
+            ) : (
+              <h1 className="text-3xl leading-snug break-words">{entry.english}</h1>
+            )}
+            {!revealed && !showDutch && <p className="mt-2 text-sm text-muted">{entry.word_type === "noun" ? "noun — with de or het" : entry.word_type}</p>}
+            {revealed && (
+              <div className="mt-6 border-t border-line pt-5">
+                <Grammar entry={entry} />
+                {example && (
+                  <div className="mt-5">
+                    <div className="flex items-start gap-1">
+                      <p className="min-w-0 font-dutch text-lg leading-snug break-words text-ink/80">{example.dutch}</p>
+                      <span className="pointer-events-auto shrink-0"><PlayButton text={example.dutch} size="sm" /></span>
+                    </div>
+                    {example.english && (
+                      <p className="text-sm text-muted">
+                        {example.english} {example.ai && <AiBadge />}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <p className="text-center text-xs text-muted">Tap to {revealed ? "flip back" : "see the answer"}</p>
         </div>
-      )}
+      </div>
     </section>
   );
 }
@@ -263,53 +286,54 @@ function Grammar({ entry }: { entry: SessionItem["entry"] }) {
 
 function Summary({
   saving,
-  answers,
-  again,
-  newWords,
+  learned,
+  remaining,
   minutes,
   streak,
   saveFailed,
   onRetry,
+  onBack,
 }: {
   saving: boolean;
-  answers: number;
-  again: number;
-  newWords: number;
+  learned: number;
+  remaining: number;
   minutes: number;
   streak: number;
   saveFailed: number;
   onRetry: () => void;
+  onBack?: () => void;
 }) {
-  const remembered = answers ? Math.round(((answers - again) / answers) * 100) : 0;
   return (
-    <main className="flex flex-1 flex-col justify-end gap-8 px-6 pb-[max(2rem,env(safe-area-inset-bottom))]">
+    <main className="flex flex-1 flex-col justify-end gap-8 px-6 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div>
         <h1 className="font-dutch text-4xl">Goed gedaan</h1>
-        <p className="mt-2 text-muted">Session complete.</p>
+        <p className="mt-2 text-muted">{saving ? "Saving your progress…" : remaining === 0 ? "Session complete." : "Your session so far."}</p>
       </div>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-5">
-        <SummaryStat label="answers" value={answers} />
-        <SummaryStat label="remembered" value={`${remembered}%`} />
-        <SummaryStat label={newWords === 1 ? "new word" : "new words"} value={newWords} />
+        <SummaryStat label={learned === 1 ? "card learned" : "cards learned"} value={learned} />
+        <SummaryStat label="still learning" value={remaining} />
         <SummaryStat label="day streak" value={streak} />
       </dl>
       <p className="text-sm text-muted">
-        About {minutes} {minutes === 1 ? "minute" : "minutes"}.
+        About {minutes} {minutes === 1 ? "minute" : "minutes"}. Cards you haven’t marked as learned stay available to practise.
       </p>
       {saveFailed > 0 && (
         <button onClick={onRetry} className="rounded-xl bg-warn-soft px-4 py-3 text-left text-sm">
-          {saveFailed} {saveFailed === 1 ? "answer wasn't" : "answers weren't"} saved. Tap to retry.
+          {saveFailed} {saveFailed === 1 ? "card wasn't" : "cards weren't"} saved. Tap to retry.
         </button>
       )}
-      {saving ? (
-        <div className="btn-primary gap-2 opacity-70">
-          <Loader2 className="size-5 animate-spin" aria-hidden /> Saving…
-        </div>
-      ) : (
-        <Link href="/" className="btn-primary">
-          Done
-        </Link>
-      )}
+      <div className="flex flex-col gap-3">
+        {onBack && <button type="button" onClick={onBack} className="btn-secondary" disabled={saving}>Back to cards</button>}
+        {saving ? (
+          <div className="btn-primary gap-2 opacity-70" role="status">
+            <Loader2 className="size-5 animate-spin" aria-hidden /> Saving…
+          </div>
+        ) : (
+          <Link href="/" className="btn-primary">
+            {saveFailed > 0 ? "Leave without saving" : "Done"}
+          </Link>
+        )}
+      </div>
     </main>
   );
 }

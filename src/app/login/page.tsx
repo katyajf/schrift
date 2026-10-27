@@ -5,14 +5,16 @@ export const metadata = { title: "Sign in" };
 
 export default function LoginPage({ searchParams }: PageProps<"/login">) {
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-end gap-10 px-6 pb-[max(2rem,env(safe-area-inset-bottom))]">
-      <div>
-        <h1 className="font-dutch text-4xl">Schrift</h1>
-        <p className="mt-2 text-muted">Your Dutch notebook, one word at a time.</p>
+    <main className="mx-auto flex min-h-screen w-full max-w-sm flex-col px-6 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))] supports-[height:100dvh]:min-h-dvh">
+      <div className="mt-auto flex flex-col gap-10">
+        <div>
+          <h1 className="font-dutch text-4xl">Schrift</h1>
+          <p className="mt-2 text-muted">Your Dutch notebook, one word at a time.</p>
+        </div>
+        <Suspense fallback={<LoginForm />}>
+          <LoginFormWithError searchParams={searchParams} />
+        </Suspense>
       </div>
-      <Suspense fallback={<LoginForm />}>
-        <LoginFormWithError searchParams={searchParams} />
-      </Suspense>
     </main>
   );
 }
