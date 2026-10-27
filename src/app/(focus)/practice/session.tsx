@@ -96,6 +96,66 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
     setRevealed(false);
   }, [total]);
 
+  // Swipe like a card stack: drag left for the next card, right for the previous.
+  // The card follows your finger; past the threshold it slides off and the next one fades in.
+  const [dragX, setDragX] = useState(0);
+  const [settling, setSettling] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const drag = useRef<{ x: number; y: number; id: number; horizontal: boolean | null } | null>(null);
+  const suppressTap = useRef(false);
+  const SWIPE_THRESHOLD = 80;
+
+  const swipeHandlers = {
+    onPointerDown(event: React.PointerEvent<HTMLElement>) {
+      if (settling || (event.pointerType === "mouse" && event.button !== 0)) return;
+      drag.current = { x: event.clientX, y: event.clientY, id: event.pointerId, horizontal: null };
+    },
+    onPointerMove(event: React.PointerEvent<HTMLElement>) {
+      const d = drag.current;
+      if (!d || d.id !== event.pointerId) return;
+      const x = event.clientX - d.x;
+      const y = event.clientY - d.y;
+      // Decide once, after a few pixels, whether this is a swipe or a scroll.
+      if (d.horizontal === null && Math.hypot(x, y) > 8) {
+        d.horizontal = Math.abs(x) > Math.abs(y);
+        if (d.horizontal) {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          setDragging(true);
+        }
+      }
+      if (!d.horizontal) return;
+      const pastEdge = (x > 0 && index === 0) || (x < 0 && index === total - 1);
+      setDragX(pastEdge ? x * 0.25 : x); // resist when there's no card that way
+    },
+    onPointerUp() {
+      const d = drag.current;
+      drag.current = null;
+      setDragging(false);
+      if (!d?.horizontal) return;
+      suppressTap.current = true; // the click that follows a swipe shouldn't flip the card
+      setTimeout(() => (suppressTap.current = false), 50);
+      const direction = dragX <= -SWIPE_THRESHOLD ? 1 : dragX >= SWIPE_THRESHOLD ? -1 : 0;
+      const canMove = (direction === 1 && index < total - 1) || (direction === -1 && index > 0);
+      if (!canMove) return setDragX(0);
+      setSettling(true);
+      setDragX(-direction * window.innerWidth);
+      setTimeout(() => {
+        move(direction as -1 | 1);
+        setDragX(0);
+        setSettling(false);
+      }, 180);
+    },
+    onPointerCancel() {
+      drag.current = null;
+      setDragging(false);
+      setDragX(0);
+    },
+  };
+
+  const tapFlip = useCallback(() => {
+    if (!suppressTap.current) flip();
+  }, [flip]);
+
   const finish = useCallback(() => {
     setMinutes(Math.max(1, Math.round((Date.now() - startedAt.current) / 60_000)));
     setPhase("saving");
@@ -173,37 +233,48 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
         )}
       </header>
 
-      <CardFace key={current.card.id} item={current} revealed={revealed} onFlip={flip} />
+      <CardFace
+        key={current.card.id}
+        item={current}
+        revealed={revealed}
+        onFlip={tapFlip}
+        dragX={dragX}
+        dragging={dragging}
+        swipeHandlers={swipeHandlers}
+      />
 
       <div className="sticky bottom-0 bg-paper px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
         {status === "error" && (
           <p role="alert" className="mb-2 text-center text-sm text-danger">Couldn’t save this card. Try again.</p>
         )}
+        {/* Secondary action: outlined, so moving between cards stays the main thing. */}
         <button
           type="button"
-          className="btn-primary gap-2"
+          className={`flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border text-sm transition active:bg-sunken disabled:opacity-50 ${
+            status === "learned" ? "border-accent bg-accent-soft text-ink" : "border-accent/60 text-accent"
+          }`}
           onClick={markLearned}
           disabled={!checkedAnswer || status === "saving" || status === "learned"}
         >
-          {status === "saving" ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Check className="size-5" aria-hidden />}
+          {status === "saving" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Check className="size-4" aria-hidden />}
           {status === "saving" ? "Saving…" : status === "learned" ? "Learned" : status === "error" ? "Retry saving" : "Mark as learned"}
         </button>
-        <p role="status" className="mt-2 text-center text-xs text-muted">
+        <p role="status" className="mt-1.5 text-center text-xs text-muted">
           {status === "learned" ? "Saved. This card will come back for review." : !checkedAnswer ? "Flip the card to check the answer first." : "Still learning? Move on and come back to it."}
         </p>
-        <nav aria-label="Card navigation" className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <button type="button" className="btn-ghost justify-start px-0 disabled:opacity-40" onClick={() => move(-1)} disabled={index === 0}>
+        <nav aria-label="Card navigation" className="mt-3 grid grid-cols-3 gap-2">
+          <button type="button" className="btn-secondary min-h-13 text-ink disabled:opacity-35" onClick={() => move(-1)} disabled={index === 0}>
             <ChevronLeft className="size-5" aria-hidden /> Previous
           </button>
-          <button type="button" className="btn-secondary" onClick={flip} aria-label="Flip card">
+          <button type="button" className="btn-secondary min-h-13 text-ink" onClick={flip} aria-label="Flip card">
             <RotateCw className="size-4" aria-hidden /> Flip
           </button>
           {index < total - 1 ? (
-            <button type="button" className="btn-ghost justify-end px-0" onClick={() => move(1)}>
+            <button type="button" className="btn-secondary min-h-13 text-ink" onClick={() => move(1)}>
               Next <ChevronRight className="size-5" aria-hidden />
             </button>
           ) : (
-            <button type="button" className="btn-ghost justify-end px-0 text-accent" onClick={finish}>
+            <button type="button" className="btn-secondary min-h-13 border-accent text-accent" onClick={finish}>
               Finish <Check className="size-5" aria-hidden />
             </button>
           )}
@@ -213,15 +284,38 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
   );
 }
 
-function CardFace({ item, revealed, onFlip }: { item: SessionItem; revealed: boolean; onFlip: () => void }) {
+function CardFace({
+  item,
+  revealed,
+  onFlip,
+  dragX,
+  dragging,
+  swipeHandlers,
+}: {
+  item: SessionItem;
+  revealed: boolean;
+  onFlip: () => void;
+  dragX: number;
+  dragging: boolean;
+  swipeHandlers: React.HTMLAttributes<HTMLElement>;
+}) {
   const { entry, card, example } = item;
   const spoken = entry.article ? `${entry.article} ${entry.dutch}` : entry.dutch;
   const showDutch = (card.kind === "recognise") !== revealed;
   const flipLabel = showDutch ? "Show meaning" : "Show Dutch word";
 
   return (
-    <section aria-label="Flashcard" className="flex flex-1 px-5 py-4">
-      <div className="relative flex min-h-64 min-w-0 flex-1 flex-col rounded-3xl border border-line bg-card">
+    <section aria-label="Flashcard" className="flex flex-1 overflow-x-clip px-5 py-4">
+      <div
+        {...swipeHandlers}
+        className="relative flex min-h-64 min-w-0 flex-1 animate-[card-in_200ms_ease-out] flex-col rounded-3xl border border-line bg-card"
+        style={{
+          touchAction: "pan-y",
+          transform: dragX ? `translateX(${dragX}px) rotate(${Math.max(-4, Math.min(4, dragX / 40))}deg)` : undefined,
+          transition: dragging ? "none" : "transform 180ms ease-out, opacity 180ms ease-out",
+          opacity: dragX ? Math.max(0.3, 1 - Math.abs(dragX) / 500) : undefined,
+        }}
+      >
         <button
           type="button"
           className="absolute inset-0 rounded-3xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
@@ -266,7 +360,7 @@ function CardFace({ item, revealed, onFlip }: { item: SessionItem; revealed: boo
               </div>
             )}
           </div>
-          <p className="text-center text-xs text-muted">Tap to {revealed ? "flip back" : "see the answer"}</p>
+          <p className="text-center text-xs text-muted">Tap to {revealed ? "flip back" : "see the answer"} · swipe for the next card</p>
         </div>
       </div>
     </section>

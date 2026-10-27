@@ -100,6 +100,13 @@ body {
   font-family: var(--font-sans);
 }
 
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
 @layer components {
   .field {
     @apply w-full rounded-xl border border-line-strong bg-card px-4 py-3 text-base text-ink outline-none placeholder:text-muted/70 focus:border-accent;
