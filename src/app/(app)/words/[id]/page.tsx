@@ -32,11 +32,16 @@ async function Word({ params }: Pick<PageProps<"/words/[id]">, "params">) {
   const { id } = await params;
   const { supabase } = await requireUser();
 
-  const [{ data: entry }, { data: examples }, { data: entryTags }, { data: allTags }] = await Promise.all([
+  const [{ data: entry }, { data: examples }, { data: entryTags }, { data: allTags }, { data: cards }] = await Promise.all([
     supabase.from("entries").select("*, pages(storage_path, created_at)").eq("id", id).maybeSingle(),
     supabase.from("example_sentences").select("*").eq("entry_id", id).order("position"),
     supabase.from("entry_tags").select("tag_id, tags(id, name)").eq("entry_id", id),
     supabase.from("tags").select("id, name").order("name"),
+    supabase
+      .from("cards")
+      .select("id, kind, state, due, reps, lapses, review_logs(rating, reviewed_at)")
+      .eq("entry_id", id)
+      .order("kind", { ascending: false }),
   ]);
   if (!entry) notFound();
 
@@ -103,6 +108,8 @@ async function Word({ params }: Pick<PageProps<"/words/[id]">, "params">) {
 
       <TagEditor entryId={entry.id} tags={tags} allTags={allTags ?? []} />
 
+      <PracticeHistory cards={(cards ?? []) as HistoryCard[]} />
+
       {entry.notes && (
         <section>
           <h2 className="mb-1 text-sm text-muted">Notes</h2>
@@ -118,5 +125,63 @@ async function Word({ params }: Pick<PageProps<"/words/[id]">, "params">) {
 
       <EntryEditor entry={entry} />
     </article>
+  );
+}
+
+type HistoryCard = {
+  id: string;
+  kind: "recognise" | "produce";
+  state: number;
+  due: string;
+  reps: number;
+  lapses: number;
+  review_logs: { rating: number; reviewed_at: string }[];
+};
+
+const RATING_LABEL = ["", "Again", "Hard", "Good", "Easy"];
+const DIRECTION = { recognise: "Dutch → English", produce: "English → Dutch" };
+
+// Request-time render, so reading the clock here is intended.
+function nextReview(card: HistoryCard) {
+  if (card.state === 0) return "not studied yet";
+  const days = Math.round((new Date(card.due).getTime() - Date.now()) / 86_400_000);
+  if (days <= 0) return "due now";
+  if (days === 1) return "next review tomorrow";
+  if (days < 60) return `next review in ${days} days`;
+  return `next review in ${Math.round(days / 30)} months`;
+}
+
+function PracticeHistory({ cards }: { cards: HistoryCard[] }) {
+  if (!cards.length) return null;
+  const logs = cards
+    .flatMap((c) => c.review_logs.map((l) => ({ ...l, kind: c.kind })))
+    .sort((a, b) => b.reviewed_at.localeCompare(a.reviewed_at))
+    .slice(0, 12);
+
+  return (
+    <section>
+      <h2 className="mb-3 text-sm text-muted">Practice</h2>
+      <ul className="flex flex-col gap-1.5">
+        {cards.map((c) => (
+          <li key={c.id} className="flex justify-between gap-4 text-sm">
+            <span>{DIRECTION[c.kind]}</span>
+            <span className="text-muted">{nextReview(c)}</span>
+          </li>
+        ))}
+      </ul>
+      {logs.length > 0 && (
+        <ol className="mt-4 flex flex-col gap-1 border-t border-line pt-3 text-sm">
+          {logs.map((l, i) => (
+            <li key={i} className="flex justify-between gap-4 text-muted">
+              <span>
+                {new Date(l.reviewed_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} ·{" "}
+                {l.kind === "recognise" ? "NL → EN" : "EN → NL"}
+              </span>
+              <span className={l.rating === 1 ? "text-danger" : "text-ink"}>{RATING_LABEL[l.rating]}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 }

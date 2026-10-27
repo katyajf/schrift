@@ -22,8 +22,8 @@ export function NewCardLimit({ initial }: { initial: number | null }) {
   return (
     <div className="flex items-center justify-between rounded-2xl border border-line bg-card p-4">
       <div>
-        <p>New words per day</p>
-        <p className="text-sm text-muted">Used once daily practice arrives</p>
+        <p>New cards per day</p>
+        <p className="text-sm text-muted">Each word has two: Dutch → English, then English → Dutch the day after</p>
         {message && <p className="text-sm text-danger">{message}</p>}
       </div>
       <div className="flex items-center gap-1" aria-busy={pending}>

@@ -83,6 +83,46 @@ export type ExampleSentenceRow = {
   created_at: string;
 };
 
+export type CardRow = {
+  id: string;
+  user_id: string;
+  entry_id: string;
+  kind: "recognise" | "produce";
+  due: string;
+  stability: number;
+  difficulty: number;
+  elapsed_days: number;
+  scheduled_days: number;
+  learning_steps: number;
+  reps: number;
+  lapses: number;
+  state: number;
+  last_review: string | null;
+  introduced_at: string | null;
+  suspended: boolean;
+  created_at: string;
+};
+
+export type ReviewLogRow = {
+  id: string;
+  user_id: string;
+  card_id: string;
+  rating: number;
+  state: number;
+  due: string;
+  stability: number;
+  difficulty: number;
+  elapsed_days: number;
+  last_elapsed_days: number;
+  scheduled_days: number;
+  learning_steps: number;
+  reviewed_at: string;
+  exercise: string;
+  duration_ms: number | null;
+  answer: string | null;
+  correct: boolean | null;
+};
+
 export type TagRow = { id: string; user_id: string; name: string; created_at: string };
 export type EntryTagRow = { entry_id: string; tag_id: string; user_id: string };
 
@@ -112,6 +152,16 @@ export type Database = {
         [{ foreignKeyName: "example_sentences_entry_id_fkey"; columns: ["entry_id"]; isOneToOne: false; referencedRelation: "entries"; referencedColumns: ["id"] }]
       >;
       tags: Table<TagRow, Insertable<TagRow, "name">>;
+      cards: Table<
+        CardRow,
+        Insertable<CardRow, "entry_id" | "kind">,
+        [{ foreignKeyName: "cards_entry_id_fkey"; columns: ["entry_id"]; isOneToOne: false; referencedRelation: "entries"; referencedColumns: ["id"] }]
+      >;
+      review_logs: Table<
+        ReviewLogRow,
+        Insertable<ReviewLogRow, "card_id" | "rating" | "state" | "due" | "stability" | "difficulty" | "elapsed_days" | "last_elapsed_days" | "scheduled_days">,
+        [{ foreignKeyName: "review_logs_card_id_fkey"; columns: ["card_id"]; isOneToOne: false; referencedRelation: "cards"; referencedColumns: ["id"] }]
+      >;
       entry_tags: Table<
         EntryTagRow,
         Insertable<EntryTagRow, "entry_id" | "tag_id">,
@@ -135,6 +185,22 @@ export type Database = {
         }[];
       };
       save_page_entries: { Args: { p_page_id: string; p_entries: Json }; Returns: number };
+      record_review: {
+        Args: { p_card_id: string; p_expected_reps: number; p_card: Json; p_log: Json };
+        Returns: undefined;
+      };
+      practice_overview: {
+        Args: Record<string, never>;
+        Returns: {
+          due_count: number;
+          new_count: number;
+          new_today: number;
+          reviews_today: number;
+          streak: number;
+          studied_today: boolean;
+        }[];
+      };
+      session_cards: { Args: { p_free?: boolean }; Returns: CardRow[] };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };
