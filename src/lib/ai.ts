@@ -2,6 +2,7 @@ import "server-only";
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import { ExtractionResultSchema, type ExtractedEntry } from "@/lib/entry-schema";
+import { normalizeEntryCasing } from "@/lib/casing";
 
 // The only file that knows which AI provider is in use. The rest of the app
 // calls these functions, so swapping providers means rewriting this file only.
@@ -69,6 +70,7 @@ Rules:
 - Return one entry per vocabulary item, in reading order.
 - Skip anything crossed out, page headers, dates and doodles.
 - "dutch": copy exactly what is written, minus a leading de/het. Do NOT fix spelling or accents here, even if you are sure it is wrong.
+- Casing: the learner often writes in block capitals. Always transcribe in normal casing, never all caps: Dutch and English words in lowercase, example sentences in sentence case, and capitals only where the language requires them (names, "Nederland", English "I"). Changing case is not a spelling correction.
 - If the Dutch looks misspelled, put the correct spelling in "suggestion" with a short reason. Otherwise "suggestion" is null.
 - Fill in the article, plural (nouns) and past tense singular/plural, past participle and auxiliary (verbs) from your knowledge of Dutch when they aren't written, and list every field you filled yourself in "ai_filled". Same for "english" if no meaning is written.
 - Verbs: "dutch" is the infinitive as written. Keep reflexive "zich" and separable particles as written.
@@ -149,10 +151,12 @@ function isTimeout(error: unknown) {
   return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
 }
 
-function cleanEntry(entry: ExtractedEntry): ExtractedEntry {
+function cleanEntry(raw: ExtractedEntry): ExtractedEntry {
+  const entry = normalizeEntryCasing(raw);
   const dutch = entry.dutch.trim();
+  // A "correction" that only changes capitals isn't a spelling suggestion.
   const suggestion =
-    entry.suggestion && entry.suggestion.dutch.trim() !== dutch ? entry.suggestion : null;
+    entry.suggestion && entry.suggestion.dutch.trim().toLowerCase() !== dutch.toLowerCase() ? entry.suggestion : null;
   return {
     ...entry,
     dutch,
