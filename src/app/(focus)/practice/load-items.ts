@@ -1,7 +1,17 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CardRow, Database } from "@/lib/database.types";
+import { arrangeLesson } from "@/lib/lesson";
 import type { SessionItem } from "./session";
+
+export const LESSON_SIZE = 15;
+
+// A fresh lesson: picked by the database (due, new, refreshers), ordered here.
+export async function loadLessonItems(supabase: SupabaseClient<Database>): Promise<SessionItem[]> {
+  const { data: cards, error } = await supabase.rpc("lesson_cards", { p_size: LESSON_SIZE });
+  if (error) throw error;
+  return arrangeLesson(await toSessionItems(supabase, cards ?? []));
+}
 
 // Turns card rows into what the session screen shows: the card's scheduling
 // state, its word, and the first example sentence.

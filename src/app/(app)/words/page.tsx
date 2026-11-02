@@ -83,6 +83,11 @@ async function WordList({ searchParams }: { searchParams: SearchParams }) {
     return <p className="px-5 pt-6 text-danger">Couldn&rsquo;t load your words.</p>;
   }
 
+  const { data: progress } = entries?.length
+    ? await supabase.from("entry_progress").select("entry_id, times_learned").in("entry_id", entries.map((e) => e.id))
+    : { data: [] };
+  const learnedCount = new Map((progress ?? []).map((p) => [p.entry_id, p.times_learned]));
+
   const filtered = filters.q || filters.type || filters.tag || filters.added || filters.page;
 
   if (!entries?.length) {
@@ -106,9 +111,12 @@ async function WordList({ searchParams }: { searchParams: SearchParams }) {
       <ul className="divide-y divide-line px-2">
         {entries.map((e) => (
           <li key={e.id} className="flex items-center">
-            <Link href={`/words/${e.id}`} className="min-w-0 flex-1 rounded-xl px-3 py-3 active:bg-sunken">
-              <DutchTerm dutch={e.dutch} article={e.article} className="block truncate text-xl" />
-              <span className="block truncate text-sm text-muted">{e.english}</span>
+            <Link href={`/words/${e.id}`} className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-3 active:bg-sunken">
+              <span className="min-w-0 flex-1">
+                <DutchTerm dutch={e.dutch} article={e.article} className="block truncate text-xl" />
+                <span className="block truncate text-sm text-muted">{e.english}</span>
+              </span>
+              <LearnedCount times={learnedCount.get(e.id) ?? 0} />
             </Link>
             <PlayButton text={e.article ? `${e.article} ${e.dutch}` : e.dutch} className="mr-1" />
           </li>
@@ -128,5 +136,15 @@ function ListSkeleton() {
         </li>
       ))}
     </ul>
+  );
+}
+
+// "learned 3×" = how many times you've answered this word correctly, in either direction.
+function LearnedCount({ times }: { times: number }) {
+  if (times === 0) return <span className="shrink-0 text-xs text-muted/70">new</span>;
+  return (
+    <span className="shrink-0 text-xs text-muted tabular-nums" aria-label={`Learned ${times} ${times === 1 ? "time" : "times"}`}>
+      learned {times}×
+    </span>
   );
 }

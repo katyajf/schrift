@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Loader2, Plus, Shuffle, X } from "lucide-react";
+import { Check, Loader2, Plus, RotateCcw, Shuffle, X } from "lucide-react";
 import { AiBadge, DutchTerm } from "@/components/dutch-term";
 import { PlayButton } from "@/components/play-button";
-import { Rating, type CardFields, type Grade } from "@/lib/fsrs";
+import { fromFsrsCard, Rating, scheduler, toFsrsCard, type CardFields, type Grade } from "@/lib/fsrs";
+import { requeuePosition } from "@/lib/lesson";
 import type { Article, Auxiliary, WordType } from "@/lib/database.types";
-import { gradeCard, loadNewCards } from "./actions";
+import { gradeCard, loadLesson, loadNewCards } from "./actions";
 
 export type SessionItem = {
   card: CardFields & { id: string; kind: "recognise" | "produce" };
@@ -28,32 +29,33 @@ export type SessionItem = {
 
 type GradeInput = { cardId: string; rating: Grade; expectedReps: number; durationMs: number | null };
 
-type SaveStatus = "saving" | "learned" | "error";
+const SWIPE_THRESHOLD = 80;
 
+// Each card is a quick self-check, as in Duolingo and Babbel reviews:
+//   Got it          -> "Good": the card moves on to a longer interval
+//   Still learning  -> "Again": it comes back a few cards later in this lesson,
+//                      and sooner on later days
+// Swipe right for Got it, left for Still learning.
 export function Session({ items, streak, studiedToday }: { items: SessionItem[]; streak: number; studiedToday: boolean }) {
-  // The current round. "Go again" and "Add new words" replace it with a reshuffled one.
-  const [deck, setDeck] = useState(items);
-  const [round, setRound] = useState(1);
-  const [addingWords, setAddingWords] = useState(false);
-  const [addMessage, setAddMessage] = useState<string | null>(null);
-  const seenCardIds = useRef(new Set(items.map((i) => i.card.id)));
-  const [index, setIndex] = useState(0);
+  // queue[0] is the card on screen; missed cards are put back further down.
+  const [queue, setQueue] = useState(items);
+  const [lessonSize, setLessonSize] = useState(items.length);
+  const [lessonNumber, setLessonNumber] = useState(1);
   const [revealed, setRevealed] = useState(false);
-  const [seenAnswers, setSeenAnswers] = useState<Set<string>>(new Set());
-  const [statuses, setStatuses] = useState<Record<string, SaveStatus>>({});
   const [phase, setPhase] = useState<"cards" | "saving" | "summary">("cards");
+  const [tally, setTally] = useState({ gotIt: 0, missedWords: new Set<string>(), newWords: new Set<string>() });
+  const [saveFailed, setSaveFailed] = useState(0);
   const [minutes, setMinutes] = useState(1);
+  const [loadingNext, setLoadingNext] = useState<"lesson" | "words" | null>(null);
+  const [nextMessage, setNextMessage] = useState<string | null>(null);
   const shownAt = useRef(0);
   const startedAt = useRef(0);
   const saveChain = useRef<Promise<void>>(Promise.resolve());
-  // Keep an immediate lock as well as rendered state to guard rapid double taps.
-  const saveStatuses = useRef<Record<string, SaveStatus>>({});
-  const inputs = useRef(new Map<string, GradeInput>());
-  const total = deck.length;
-  const current = deck[index];
-  const learned = deck.filter((item) => statuses[item.card.id] === "learned").length;
-  const saveFailed = Object.values(statuses).filter((status) => status === "error").length;
-  const saving = Object.values(statuses).some((status) => status === "saving");
+  const failed = useRef<GradeInput[]>([]);
+  const seenCardIds = useRef(new Set(items.map((i) => i.card.id)));
+  const current = queue[0];
+  const remainingCards = new Set(queue.map((i) => i.card.id)).size;
+  const done = lessonSize - remainingCards;
 
   useEffect(() => {
     const now = Date.now();
@@ -61,66 +63,85 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
     shownAt.current = now;
   }, [current]);
 
+  // Answers are saved one at a time and in order, without holding up the next card.
   const save = useCallback((input: GradeInput) => {
-    if (["saving", "learned"].includes(saveStatuses.current[input.cardId])) return;
-    inputs.current.set(input.cardId, input);
-    const updateStatus = (status: SaveStatus) => {
-      saveStatuses.current[input.cardId] = status;
-      setStatuses((previous) => ({ ...previous, [input.cardId]: status }));
-    };
-    updateStatus("saving");
-    // Preserve the existing server action's ordered, idempotent review saving.
     saveChain.current = saveChain.current.then(async () => {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const result = await gradeCard(input);
-          if (result.ok) {
-            updateStatus("learned");
-            return;
-          }
+          if ((await gradeCard(input)).ok) return;
         } catch {}
-        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
       }
-      updateStatus("error");
+      failed.current.push(input);
+      setSaveFailed(failed.current.length);
     });
   }, []);
 
   function retryFailed() {
-    for (const [cardId, input] of inputs.current) {
-      if (saveStatuses.current[cardId] === "error") save(input);
-    }
+    const again = failed.current.splice(0);
+    setSaveFailed(0);
+    again.forEach(save);
   }
 
-  const flip = useCallback(() => {
-    if (!current) return;
-    setRevealed((previous) => !previous);
-    setSeenAnswers((previous) => new Set(previous).add(current.card.id));
-  }, [current]);
+  const flip = useCallback(() => setRevealed((r) => !r), []);
 
-  const move = useCallback((direction: -1 | 1) => {
-    setIndex((previous) => Math.max(0, Math.min(total - 1, previous + direction)));
-    setRevealed(false);
-  }, [total]);
+  const finish = useCallback(() => {
+    setMinutes(Math.max(1, Math.round((Date.now() - startedAt.current) / 60_000)));
+    setPhase("saving");
+    saveChain.current.then(() => setPhase("summary"));
+  }, []);
 
-  // Swipe like a card stack: drag left for the next card, right for the previous.
-  // The card follows your finger; past the threshold it slides off and the next one fades in.
+  // --- Answering --------------------------------------------------------------
+
   const [dragX, setDragX] = useState(0);
-  const [settling, setSettling] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [settling, setSettling] = useState(false);
+
+  const answer = useCallback(
+    (gotIt: boolean) => {
+      if (!current || settling) return;
+      const now = new Date();
+      const rating: Grade = gotIt ? Rating.Good : Rating.Again;
+      const next = scheduler.next(toFsrsCard(current.card), now, rating).card;
+
+      save({
+        cardId: current.card.id,
+        rating,
+        expectedReps: current.card.reps,
+        durationMs: Math.min(3_600_000, Math.round(now.getTime() - shownAt.current)),
+      });
+
+      setTally((t) => ({
+        gotIt: t.gotIt + (gotIt ? 1 : 0),
+        missedWords: gotIt ? t.missedWords : new Set(t.missedWords).add(current.entry.id),
+        newWords: current.card.state === 0 ? new Set(t.newWords).add(current.entry.id) : t.newWords,
+      }));
+
+      const rest = queue.slice(1);
+      if (!gotIt) {
+        // Same card, with its updated schedule, a few cards further on.
+        const retry = { ...current, card: { ...current.card, ...fromFsrsCard(next) } };
+        rest.splice(requeuePosition(rest.length), 0, retry);
+      }
+
+      // Slide off the way it was answered, then show the next card.
+      setSettling(true);
+      setDragX((gotIt ? 1 : -1) * window.innerWidth);
+      setTimeout(() => {
+        setQueue(rest);
+        setRevealed(false);
+        setDragX(0);
+        setSettling(false);
+        if (rest.length === 0) finish();
+      }, 180);
+    },
+    [current, queue, save, settling, finish],
+  );
+
+  // --- Swipe ------------------------------------------------------------------
+
   const drag = useRef<{ x: number; y: number; id: number; horizontal: boolean | null } | null>(null);
   const suppressTap = useRef(false);
-  const SWIPE_THRESHOLD = 80;
-
-  // Slide the current card off-screen, then show the neighbouring one.
-  function slideTo(direction: -1 | 1) {
-    setSettling(true);
-    setDragX(-direction * window.innerWidth);
-    setTimeout(() => {
-      move(direction);
-      setDragX(0);
-      setSettling(false);
-    }, 180);
-  }
 
   const swipeHandlers = {
     onPointerDown(event: React.PointerEvent<HTMLElement>) {
@@ -140,21 +161,18 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
           setDragging(true);
         }
       }
-      if (!d.horizontal) return;
-      const pastEdge = (x > 0 && index === 0) || (x < 0 && index === total - 1);
-      setDragX(pastEdge ? x * 0.25 : x); // resist when there's no card that way
+      if (d.horizontal) setDragX(x);
     },
     onPointerUp() {
       const d = drag.current;
       drag.current = null;
       setDragging(false);
       if (!d?.horizontal) return;
-      suppressTap.current = true; // the click that follows a swipe shouldn't flip the card
+      suppressTap.current = true; // the click after a swipe shouldn't flip the card
       setTimeout(() => (suppressTap.current = false), 50);
-      const direction = dragX <= -SWIPE_THRESHOLD ? 1 : dragX >= SWIPE_THRESHOLD ? -1 : 0;
-      const canMove = (direction === 1 && index < total - 1) || (direction === -1 && index > 0);
-      if (!canMove) return setDragX(0);
-      slideTo(direction as -1 | 1);
+      if (dragX >= SWIPE_THRESHOLD) answer(true);
+      else if (dragX <= -SWIPE_THRESHOLD) answer(false);
+      else setDragX(0);
     },
     onPointerCancel() {
       drag.current = null;
@@ -167,131 +185,125 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
     if (!suppressTap.current) flip();
   }, [flip]);
 
-  const finish = useCallback(() => {
-    setMinutes(Math.max(1, Math.round((Date.now() - startedAt.current) / 60_000)));
-    setPhase("saving");
-    saveChain.current.then(() => setPhase("summary"));
-  }, []);
-
-  function markLearned() {
-    if (!current || !seenAnswers.has(current.card.id) || settling) return;
-    const previousInput = inputs.current.get(current.card.id);
-    save(previousInput ?? {
-      cardId: current.card.id,
-      // A learned card graduates to review; it is not removed permanently.
-      rating: Rating.Easy,
-      expectedReps: current.card.reps,
-      durationMs: Math.min(3_600_000, Math.max(0, Date.now() - shownAt.current)),
-    });
-    // Don't wait for the save: it carries on in the background, and the
-    // summary waits for any that are still running.
-    if (index < total - 1) slideTo(1);
-    else finish();
-  }
-
+  // Space flips; → got it, ← still learning (for a laptop keyboard).
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (phase !== "cards" || !current || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
       const target = event.target;
       if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable=true]")) return;
-      if (event.key === "ArrowLeft" && index > 0) {
+      if (event.key === "ArrowRight") {
         event.preventDefault();
-        move(-1);
-      } else if (event.key === "ArrowRight" && index < total - 1) {
+        answer(true);
+      } else if (event.key === "ArrowLeft") {
         event.preventDefault();
-        move(1);
-      } else if ((event.key === " " || event.key === "Enter") &&
-        !(target instanceof HTMLElement && target.closest("button, a"))) {
+        answer(false);
+      } else if ((event.key === " " || event.key === "Enter") && !(target instanceof HTMLElement && target.closest("button, a"))) {
         event.preventDefault();
         flip();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase, current, index, total, move, flip]);
+  }, [phase, current, answer, flip]);
 
-  function startRound(cards: SessionItem[]) {
-    setDeck(shuffle(cards));
-    setIndex(0);
+  // --- Next lesson ------------------------------------------------------------
+
+  function startLesson(next: SessionItem[]) {
+    next.forEach((i) => seenCardIds.current.add(i.card.id));
+    setQueue(next);
+    setLessonSize(next.length);
+    setLessonNumber((n) => n + 1);
+    setTally({ gotIt: 0, missedWords: new Set(), newWords: new Set() });
     setRevealed(false);
-    setSeenAnswers(new Set());
-    setDragX(0);
-    setAddMessage(null);
-    setRound((r) => r + 1);
+    setNextMessage(null);
+    startedAt.current = 0;
     setPhase("cards");
   }
 
-  // A card whose save is still in flight counts as learned.
-  const stillLearning = deck.filter((item) => !["learned", "saving"].includes(statuses[item.card.id]));
-
-  // Go again with what you haven't learned yet; if that's nothing, the whole round.
-  function goAgain() {
-    startRound(stillLearning.length ? stillLearning : deck);
+  async function anotherLesson() {
+    setLoadingNext("lesson");
+    setNextMessage(null);
+    try {
+      await saveChain.current; // so the new lesson sees today's answers
+      const result = await loadLesson();
+      if ("error" in result) return setNextMessage(result.error);
+      if (!result.items.length) return setNextMessage("Nothing left to practise. Scan more pages to add words.");
+      startLesson(result.items);
+    } catch {
+      setNextMessage("Couldn't load a lesson. Check your connection.");
+    } finally {
+      setLoadingNext(null);
+    }
   }
 
   async function addNewWords() {
-    setAddingWords(true);
-    setAddMessage(null);
+    setLoadingNext("words");
+    setNextMessage(null);
     try {
       const result = await loadNewCards({ exclude: [...seenCardIds.current], count: 10 });
-      if ("error" in result) return setAddMessage(result.error);
-      if (!result.items.length) return setAddMessage("No new words left. Scan another notebook page to add more.");
-      result.items.forEach((item) => seenCardIds.current.add(item.card.id));
-      startRound([...stillLearning, ...result.items]);
+      if ("error" in result) return setNextMessage(result.error);
+      if (!result.items.length) return setNextMessage("No new words left. Scan another notebook page to add more.");
+      startLesson(result.items);
     } catch {
-      setAddMessage("Couldn't load new words. Check your connection.");
+      setNextMessage("Couldn't load new words. Check your connection.");
     } finally {
-      setAddingWords(false);
+      setLoadingNext(null);
     }
   }
 
   if (phase !== "cards" || !current) {
-    const sessionLearned = Object.values(statuses).filter((s) => s === "learned").length;
     return (
       <Summary
-        saving={phase === "saving" || saving}
-        learned={learned}
-        remaining={total - learned}
+        saving={phase === "saving"}
+        gotIt={tally.gotIt}
+        missed={tally.missedWords.size}
+        newWords={tally.newWords.size}
         minutes={minutes}
-        streak={studiedToday || sessionLearned === 0 ? streak : streak + 1}
+        streak={studiedToday || tally.gotIt + tally.missedWords.size === 0 ? streak : streak + 1}
+        lessonNumber={lessonNumber}
+        endedEarly={queue.length > 0}
         saveFailed={saveFailed}
         onRetry={retryFailed}
-        onBack={index < total - 1 ? () => setPhase("cards") : undefined}
-        onAgain={goAgain}
-        againCount={stillLearning.length || total}
+        onResume={() => setPhase("cards")}
+        onAnotherLesson={anotherLesson}
         onAddWords={addNewWords}
-        addingWords={addingWords}
-        addMessage={addMessage}
-        round={round}
+        loadingNext={loadingNext}
+        nextMessage={nextMessage}
       />
     );
   }
 
-  const status = statuses[current.card.id];
-  const checkedAnswer = seenAnswers.has(current.card.id);
-
   return (
     <main className="flex flex-1 flex-col">
       <header className="px-5 pt-[max(1rem,env(safe-area-inset-top))]">
-        <div className="h-[3px] overflow-hidden rounded-full bg-line" role="progressbar" aria-label="Cards learned" aria-valuemin={0} aria-valuemax={total} aria-valuenow={learned}>
-          <div className="h-full rounded-full bg-accent transition-[width] duration-300" style={{ width: `${(learned / total) * 100}%` }} />
+        <div
+          className="h-[3px] overflow-hidden rounded-full bg-line"
+          role="progressbar"
+          aria-label="Lesson progress"
+          aria-valuemin={0}
+          aria-valuemax={lessonSize}
+          aria-valuenow={done}
+        >
+          <div className="h-full rounded-full bg-accent transition-[width] duration-300" style={{ width: `${(done / lessonSize) * 100}%` }} />
         </div>
         <div className="flex items-center justify-between pt-1 text-xs text-muted">
-          <span className="tabular-nums" aria-live="polite">Card {index + 1} of {total}</span>
-          <span aria-live="polite">{learned} learned</span>
-          <button type="button" onClick={finish} className="-mr-2 flex size-10 items-center justify-center" aria-label="End session">
+          <span className="tabular-nums" aria-live="polite">
+            {remainingCards} to go
+          </span>
+          {current.card.state === 0 && <span className="rounded-full bg-accent-soft px-2 py-0.5 text-ink">New word</span>}
+          <button type="button" onClick={finish} className="-mr-2 flex size-10 items-center justify-center" aria-label="End lesson">
             <X className="size-5" aria-hidden />
           </button>
         </div>
-        {saveFailed > 0 && status !== "error" && (
+        {saveFailed > 0 && (
           <button onClick={retryFailed} className="mt-1 w-full rounded-lg bg-warn-soft px-3 py-2 text-left text-sm">
-            {saveFailed} {saveFailed === 1 ? "card wasn't" : "cards weren't"} saved. Tap to retry.
+            {saveFailed} {saveFailed === 1 ? "answer wasn't" : "answers weren't"} saved. Tap to retry.
           </button>
         )}
       </header>
 
       <CardFace
-        key={current.card.id}
+        key={`${current.card.id}-${current.card.reps}`}
         item={current}
         revealed={revealed}
         onFlip={tapFlip}
@@ -301,41 +313,14 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
       />
 
       <div className="sticky bottom-0 bg-paper px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-        {status === "error" && (
-          <p role="alert" className="mb-2 text-center text-sm text-danger">Couldn’t save this card. Try again.</p>
-        )}
-        {/* Screen-reader hint; the card itself says "Tap to see the answer". */}
-        <p role="status" className="sr-only">
-          {status === "learned" ? "Saved. This card will come back for review." : !checkedAnswer ? "Flip the card to check the answer first." : ""}
-        </p>
-        <nav aria-label="Card navigation" className="grid grid-cols-3 gap-2">
-          <button type="button" className="btn-secondary min-h-14 text-ink disabled:opacity-35" onClick={() => move(-1)} disabled={index === 0}>
-            <ChevronLeft className="size-5" aria-hidden /> Previous
+        <div className="grid grid-cols-2 gap-3">
+          <button type="button" className="btn-secondary min-h-14 text-ink" onClick={() => answer(false)} disabled={settling}>
+            <RotateCcw className="size-4" aria-hidden /> Still learning
           </button>
-          {/* Available once you've seen the answer; tap the card to flip it. */}
-          <button
-            type="button"
-            className={`flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-xl border px-1 text-center text-sm leading-tight transition active:bg-sunken disabled:opacity-40 ${
-              status === "learned" ? "border-accent bg-accent-soft text-ink" : "border-accent text-accent"
-            }`}
-            onClick={markLearned}
-            aria-label={status === "learned" ? "Learned" : "Mark as learned"}
-            disabled={!checkedAnswer || status === "saving" || status === "learned"}
-          >
-            {status === "saving" && <Loader2 className="size-4 animate-spin" aria-hidden />}
-            {status === "learned" && <Check className="size-4" aria-hidden />}
-            {status === "saving" ? "Saving…" : status === "error" ? "Retry" : "Learned"}
+          <button type="button" className="btn-secondary min-h-14 border-accent text-accent" onClick={() => answer(true)} disabled={settling}>
+            <Check className="size-5" aria-hidden /> Got it
           </button>
-          {index < total - 1 ? (
-            <button type="button" className="btn-secondary min-h-14 text-ink" onClick={() => move(1)}>
-              Next <ChevronRight className="size-5" aria-hidden />
-            </button>
-          ) : (
-            <button type="button" className="btn-secondary min-h-14 border-accent text-accent" onClick={finish}>
-              Finish <Check className="size-5" aria-hidden />
-            </button>
-          )}
-        </nav>
+        </div>
       </div>
     </main>
   );
@@ -360,12 +345,16 @@ function CardFace({
   const spoken = entry.article ? `${entry.article} ${entry.dutch}` : entry.dutch;
   const showDutch = (card.kind === "recognise") !== revealed;
   const flipLabel = showDutch ? "Show meaning" : "Show Dutch word";
+  // How far the swipe is towards an answer, 0..1, to fade in its label.
+  const lean = Math.min(1, Math.abs(dragX) / SWIPE_THRESHOLD);
 
   return (
     <section aria-label="Flashcard" className="flex flex-1 overflow-x-clip px-5 py-4">
       <div
         {...swipeHandlers}
-        className="relative flex min-h-64 min-w-0 flex-1 animate-[card-in_200ms_ease-out] flex-col rounded-3xl border border-line bg-card"
+        className={`relative flex min-h-64 min-w-0 flex-1 animate-[card-in_200ms_ease-out] flex-col rounded-3xl border bg-card ${
+          dragX >= SWIPE_THRESHOLD ? "border-accent" : dragX <= -SWIPE_THRESHOLD ? "border-warn" : "border-line"
+        }`}
         style={{
           touchAction: "pan-y",
           transform: dragX ? `translateX(${dragX}px) rotate(${Math.max(-4, Math.min(4, dragX / 40))}deg)` : undefined,
@@ -381,6 +370,17 @@ function CardFace({
           aria-pressed={revealed}
           aria-controls="flashcard-content"
         />
+        {dragX !== 0 && (
+          <span
+            aria-hidden
+            className={`pointer-events-none absolute top-5 rounded-full px-3 py-1 text-sm ${
+              dragX > 0 ? "left-5 bg-accent-soft text-accent" : "right-5 bg-warn-soft text-warn"
+            }`}
+            style={{ opacity: lean }}
+          >
+            {dragX > 0 ? "Got it" : "Still learning"}
+          </span>
+        )}
         <div id="flashcard-content" aria-live="polite" className="pointer-events-none relative flex flex-1 flex-col p-6">
           <div className="flex items-center justify-between text-xs tracking-wide text-muted">
             <span>{showDutch ? "Dutch" : "English"}</span>
@@ -392,12 +392,16 @@ function CardFace({
                 <h1 className="min-w-0 text-[2.5rem] leading-[1.15] break-words">
                   <DutchTerm dutch={entry.dutch} article={entry.article} />
                 </h1>
-                <span className="pointer-events-auto shrink-0"><PlayButton text={spoken} className="mt-1" /></span>
+                <span className="pointer-events-auto shrink-0">
+                  <PlayButton text={spoken} className="mt-1" />
+                </span>
               </div>
             ) : (
               <h1 className="text-3xl leading-snug break-words">{entry.english}</h1>
             )}
-            {!revealed && !showDutch && <p className="mt-2 text-sm text-muted">{entry.word_type === "noun" ? "noun — with de or het" : entry.word_type}</p>}
+            {!revealed && !showDutch && (
+              <p className="mt-2 text-sm text-muted">{entry.word_type === "noun" ? "noun — with de or het" : entry.word_type}</p>
+            )}
             {revealed && (
               <div className="mt-6 border-t border-line pt-5">
                 <Grammar entry={entry} />
@@ -405,7 +409,9 @@ function CardFace({
                   <div className="mt-5">
                     <div className="flex items-start gap-1">
                       <p className="min-w-0 font-dutch text-lg leading-snug break-words text-ink/80">{example.dutch}</p>
-                      <span className="pointer-events-auto shrink-0"><PlayButton text={example.dutch} size="sm" /></span>
+                      <span className="pointer-events-auto shrink-0">
+                        <PlayButton text={example.dutch} size="sm" />
+                      </span>
                     </div>
                     {example.english && (
                       <p className="text-sm text-muted">
@@ -417,7 +423,9 @@ function CardFace({
               </div>
             )}
           </div>
-          <p className="text-center text-xs text-muted">Tap to {revealed ? "flip back" : "see the answer"} · swipe for the next card</p>
+          <p className="text-center text-xs text-muted">
+            {revealed ? "Tap to flip back" : "Tap to check"} · swipe right if you knew it
+          </p>
         </div>
       </div>
     </section>
@@ -437,73 +445,78 @@ function Grammar({ entry }: { entry: SessionItem["entry"] }) {
 
 function Summary({
   saving,
-  learned,
-  remaining,
+  gotIt,
+  missed,
+  newWords,
   minutes,
   streak,
+  lessonNumber,
+  endedEarly,
   saveFailed,
   onRetry,
-  onBack,
-  onAgain,
-  againCount,
+  onResume,
+  onAnotherLesson,
   onAddWords,
-  addingWords,
-  addMessage,
-  round,
+  loadingNext,
+  nextMessage,
 }: {
   saving: boolean;
-  learned: number;
-  remaining: number;
+  gotIt: number;
+  missed: number;
+  newWords: number;
   minutes: number;
   streak: number;
+  lessonNumber: number;
+  endedEarly: boolean;
   saveFailed: number;
   onRetry: () => void;
-  onBack?: () => void;
-  onAgain: () => void;
-  againCount: number;
+  onResume: () => void;
+  onAnotherLesson: () => void;
   onAddWords: () => void;
-  addingWords: boolean;
-  addMessage: string | null;
-  round: number;
+  loadingNext: "lesson" | "words" | null;
+  nextMessage: string | null;
 }) {
   return (
     <main className="flex flex-1 flex-col justify-end gap-8 px-6 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div>
         <h1 className="font-dutch text-4xl">Goed gedaan</h1>
         <p className="mt-2 text-muted">
-          {saving ? "Saving your progress…" : remaining === 0 ? `Round ${round} done — every card learned.` : `Round ${round} done.`}
+          {saving ? "Saving your progress…" : endedEarly ? "Lesson paused." : `Lesson ${lessonNumber} done.`}
         </p>
       </div>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-5">
-        <SummaryStat label={learned === 1 ? "card learned" : "cards learned"} value={learned} />
-        <SummaryStat label="still learning" value={remaining} />
+        <SummaryStat label="got it" value={gotIt} />
+        <SummaryStat label={missed === 1 ? "word to revisit" : "words to revisit"} value={missed} />
+        <SummaryStat label={newWords === 1 ? "new word" : "new words"} value={newWords} />
         <SummaryStat label="day streak" value={streak} />
       </dl>
       <p className="text-sm text-muted">
-        About {minutes} {minutes === 1 ? "minute" : "minutes"}. Cards you haven’t marked as learned stay available to practise.
+        About {minutes} {minutes === 1 ? "minute" : "minutes"}.
+        {missed > 0 && " Words you're still learning come back sooner."}
       </p>
       {saveFailed > 0 && (
         <button onClick={onRetry} className="rounded-xl bg-warn-soft px-4 py-3 text-left text-sm">
-          {saveFailed} {saveFailed === 1 ? "card wasn't" : "cards weren't"} saved. Tap to retry.
+          {saveFailed} {saveFailed === 1 ? "answer wasn't" : "answers weren't"} saved. Tap to retry.
         </button>
       )}
-      {addMessage && (
+      {nextMessage && (
         <p role="alert" className="text-sm text-muted">
-          {addMessage}
+          {nextMessage}
         </p>
       )}
       <div className="flex flex-col gap-3">
-        {onBack && (
-          <button type="button" onClick={onBack} className="btn-ghost">
-            Back to cards
+        {endedEarly && (
+          <button type="button" onClick={onResume} className="btn-ghost">
+            Back to the lesson
           </button>
         )}
-        <button type="button" onClick={onAgain} className="btn-primary gap-2">
-          <Shuffle className="size-5" aria-hidden /> Go again ({againCount} {againCount === 1 ? "card" : "cards"}, shuffled)
+        <button type="button" onClick={onAnotherLesson} className="btn-primary gap-2" disabled={loadingNext !== null}>
+          {loadingNext === "lesson" ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Shuffle className="size-5" aria-hidden />}
+          {loadingNext === "lesson" ? "Shuffling…" : "Another lesson"}
         </button>
-        <button type="button" onClick={onAddWords} className="btn-secondary" disabled={addingWords}>
-          {addingWords ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Plus className="size-5" aria-hidden />}
-          {addingWords ? "Loading words…" : "Add 10 new words"}
+        <button type="button" onClick={onAddWords} className="btn-secondary" disabled={loadingNext !== null}>
+          {loadingNext === "words" ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Plus className="size-5" aria-hidden />}
+          {loadingNext === "words" ? "Loading words…" : "Learn 10 new words"}
         </button>
         {saving ? (
           <div className="btn-ghost gap-2" role="status">
@@ -526,14 +539,4 @@ function SummaryStat({ label, value }: { label: string; value: number | string }
       <dt className="text-sm text-muted">{label}</dt>
     </div>
   );
-}
-
-// Fisher–Yates; only ever called from button handlers, never during render.
-function shuffle<T>(list: T[]): T[] {
-  const out = [...list];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
 }

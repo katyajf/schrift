@@ -171,7 +171,12 @@ export type Database = {
         ]
       >;
     };
-    Views: { [_ in never]: never };
+    Views: {
+      entry_progress: {
+        Row: { entry_id: string; times_learned: number; times_practised: number; last_practised: string | null };
+        Relationships: [];
+      };
+    };
     Functions: {
       match_existing_entries: {
         Args: { p_keys: string[] };
@@ -200,7 +205,8 @@ export type Database = {
           studied_today: boolean;
         }[];
       };
-      session_cards: { Args: { p_free?: boolean }; Returns: CardRow[] };
+      lesson_cards: { Args: { p_size?: number }; Returns: CardRow[] };
+      random_new_cards: { Args: { p_exclude: string[]; p_limit?: number }; Returns: CardRow[] };
       eligible_new_cards: { Args: Record<string, never>; Returns: CardRow[] };
     };
     Enums: { [_ in never]: never };

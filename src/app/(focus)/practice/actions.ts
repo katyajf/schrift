@@ -4,7 +4,8 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { fromFsrsCard, scheduler, toFsrsCard, type Grade } from "@/lib/fsrs";
 import type { Json } from "@/lib/database.types";
-import { toSessionItems } from "./load-items";
+import { arrangeLesson } from "@/lib/lesson";
+import { loadLessonItems, toSessionItems } from "./load-items";
 import type { SessionItem } from "./session";
 
 const GradeInput = z.object({
@@ -64,7 +65,19 @@ const MoreInput = z.object({
   count: z.number().int().min(1).max(50).default(10),
 });
 
-// "Add new words" at the end of a session: words you haven't studied yet,
+// "Another lesson" at the end: a freshly picked and shuffled lesson. Call it
+// after the answers from the last one are saved, so it sees their new due dates.
+export async function loadLesson(): Promise<{ items: SessionItem[] } | { error: string }> {
+  const { supabase } = await requireUser();
+  try {
+    return { items: await loadLessonItems(supabase) };
+  } catch (error) {
+    console.error("lesson_cards failed", error);
+    return { error: "Couldn't load a new lesson." };
+  }
+}
+
+// "Add new words" at the end of a lesson: random words you haven't studied yet,
 // beyond today's new-card limit, skipping cards already in this session.
 export async function loadNewCards(input: unknown): Promise<{ items: SessionItem[] } | { error: string }> {
   const parsed = MoreInput.safeParse(input);
@@ -72,12 +85,10 @@ export async function loadNewCards(input: unknown): Promise<{ items: SessionItem
   const { exclude, count } = parsed.data;
   const { supabase } = await requireUser();
 
-  let query = supabase.rpc("eligible_new_cards").select("*");
-  if (exclude.length) query = query.not("id", "in", `(${exclude.join(",")})`);
-  const { data: cards, error } = await query.limit(count);
+  const { data: cards, error } = await supabase.rpc("random_new_cards", { p_exclude: exclude, p_limit: count });
   if (error) {
-    console.error("eligible_new_cards failed", error);
+    console.error("random_new_cards failed", error);
     return { error: "Couldn't load new words." };
   }
-  return { items: await toSessionItems(supabase, cards ?? []) };
+  return { items: arrangeLesson(await toSessionItems(supabase, cards ?? [])) };
 }

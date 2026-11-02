@@ -48,8 +48,8 @@ async function TodayData() {
 
 function TodayPanel({ data }: { data: TodayData | null }) {
   const total = data ? data.due + data.fresh : 0;
-  // Rough guide: ~8s for a review, ~20s for a new card.
-  const minutes = data ? Math.max(1, Math.round((data.due * 8 + data.fresh * 20) / 60)) : 0;
+  // A lesson is ~15 cards; rough guide ~8s for a review, ~20s for a new card.
+  const lessons = Math.max(1, Math.ceil(total / 15));
 
   return (
     <div className="flex flex-col gap-6 pb-6">
@@ -66,7 +66,7 @@ function TodayPanel({ data }: { data: TodayData | null }) {
       )}
 
       {!data ? (
-        <div className="btn-primary opacity-60">Start session</div>
+        <div className="btn-primary opacity-60">Start lesson</div>
       ) : data.words === 0 ? (
         <>
           <p className="text-muted">Scan a notebook page to add your first words.</p>
@@ -76,9 +76,11 @@ function TodayPanel({ data }: { data: TodayData | null }) {
         </>
       ) : total > 0 ? (
         <>
-          <p className="text-sm text-muted">About {minutes} {minutes === 1 ? "minute" : "minutes"}</p>
+          <p className="text-sm text-muted">
+            About 3 minutes per lesson{lessons > 1 ? ` · ${lessons} lessons to clear today` : ""}
+          </p>
           <Link href="/practice" className="btn-primary">
-            Start session
+            Start lesson
           </Link>
         </>
       ) : (
@@ -86,8 +88,8 @@ function TodayPanel({ data }: { data: TodayData | null }) {
           <p className="text-muted">
             {data.studiedToday ? "Klaar voor vandaag. Nothing else is due." : "Nothing is due right now."}
           </p>
-          <Link href="/practice?free=1" className="btn-secondary">
-            Practice anyway
+          <Link href="/practice" className="btn-secondary">
+            Practise known words
           </Link>
         </>
       )}

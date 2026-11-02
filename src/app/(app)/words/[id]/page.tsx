@@ -138,7 +138,9 @@ type HistoryCard = {
   review_logs: { rating: number; reviewed_at: string }[];
 };
 
-const RATING_LABEL = ["", "Again", "Hard", "Good", "Easy"];
+// 1–4 are FSRS grades; lessons record "Still learning" as 1 and "Got it" as 3.
+// 2 and 4 come from the earlier grading buttons and the old "Learned" button.
+const RATING_LABEL = ["", "Still learning", "Hard", "Got it", "Learned"];
 const DIRECTION = { recognise: "Dutch → English", produce: "English → Dutch" };
 
 // Request-time render, so reading the clock here is intended.
@@ -158,9 +160,21 @@ function PracticeHistory({ cards }: { cards: HistoryCard[] }) {
     .sort((a, b) => b.reviewed_at.localeCompare(a.reviewed_at))
     .slice(0, 12);
 
+  const allLogs = cards.flatMap((c) => c.review_logs);
+  const timesLearned = allLogs.filter((l) => l.rating >= 3).length;
+
   return (
     <section>
-      <h2 className="mb-3 text-sm text-muted">Practice</h2>
+      <h2 className="mb-1 text-sm text-muted">Practice</h2>
+      <p className="mb-3 text-lg">
+        {timesLearned === 0 ? "Not learned yet" : `Learned ${timesLearned}×`}
+        {allLogs.length > 0 && (
+          <span className="text-sm text-muted">
+            {" "}
+            · practised {allLogs.length}×
+          </span>
+        )}
+      </p>
       <ul className="flex flex-col gap-1.5">
         {cards.map((c) => (
           <li key={c.id} className="flex justify-between gap-4 text-sm">
@@ -177,7 +191,7 @@ function PracticeHistory({ cards }: { cards: HistoryCard[] }) {
                 {new Date(l.reviewed_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} ·{" "}
                 {l.kind === "recognise" ? "NL → EN" : "EN → NL"}
               </span>
-              <span className={l.rating === 1 ? "text-danger" : "text-ink"}>{RATING_LABEL[l.rating]}</span>
+              <span className={l.rating === 1 ? "text-warn" : "text-ink"}>{RATING_LABEL[l.rating]}</span>
             </li>
           ))}
         </ol>
