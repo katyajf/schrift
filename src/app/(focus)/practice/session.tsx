@@ -24,6 +24,7 @@ export type SessionItem = {
     past_plural: string | null;
     past_participle: string | null;
     auxiliary: Auxiliary | null;
+    notes: string | null;
   };
   example: { dutch: string; english: string | null; ai: boolean } | null;
 };
@@ -476,6 +477,7 @@ function CardFace({
             {revealed && (
               <div className="mt-6 border-t border-line pt-5">
                 <Grammar entry={entry} />
+                {entry.notes && <p className="mt-2 text-sm text-muted">{entry.notes}</p>}
                 {example && (
                   <div className="mt-5">
                     <div className="flex items-start gap-1">
@@ -560,6 +562,7 @@ function ArticleCardFace({
                 {correct ? "Right" : `It's ${article} ${entry.dutch}`}
               </p>
               {rule && <p className="mt-3 text-sm">{rule}</p>}
+              {entry.notes && <p className="mt-2 text-sm text-muted">{entry.notes}</p>}
               {entry.plural && (
                 <p className="mt-3 font-dutch text-sm text-muted">
                   <span className="text-de">de</span> {entry.plural} · {PLURAL_RULE}

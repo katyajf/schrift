@@ -25,7 +25,7 @@ export async function toSessionItems(supabase: SupabaseClient<Database>, cards: 
   const [{ data: entries }, { data: examples }] = await Promise.all([
     supabase
       .from("entries")
-      .select("id, dutch, english, article, word_type, plural, past_singular, past_plural, past_participle, auxiliary")
+      .select("id, dutch, english, article, word_type, plural, past_singular, past_plural, past_participle, auxiliary, notes")
       .in("id", entryIds),
     supabase
       .from("example_sentences")

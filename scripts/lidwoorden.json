@@ -1,0 +1,676 @@
+{
+  "set": {
+    "title": "Lidwoorden: de, het, een",
+    "lesson_date": "2026-11-07",
+    "file": "Nederlands_Lidwoorden_articles_UITLEG.pdf"
+  },
+  "entries": [
+    {
+      "dutch": "huis",
+      "english": "house",
+      "article": "het",
+      "plural": "huizen",
+      "tags": [
+        "lidwoorden"
+      ]
+    },
+    {
+      "dutch": "paard",
+      "english": "horse",
+      "article": "het",
+      "plural": "paarden",
+      "tags": [
+        "lidwoorden"
+      ]
+    },
+    {
+      "dutch": "kasteel",
+      "english": "castle",
+      "article": "het",
+      "plural": "kastelen",
+      "tags": [
+        "lidwoorden"
+      ]
+    },
+    {
+      "dutch": "auto",
+      "english": "car",
+      "article": "de",
+      "plural": "auto's",
+      "tags": [
+        "lidwoorden",
+        "meervoud"
+      ],
+      "notes": "Ends in -o, so the plural takes -'s."
+    },
+    {
+      "dutch": "appel",
+      "english": "apple",
+      "article": "de",
+      "plural": "appels",
+      "tags": [
+        "lidwoorden"
+      ],
+      "notes": "de: fruit."
+    },
+    {
+      "dutch": "pen",
+      "english": "pen",
+      "article": "de",
+      "plural": "pennen",
+      "tags": [
+        "lidwoorden"
+      ]
+    },
+    {
+      "dutch": "baby",
+      "english": "baby",
+      "article": "de",
+      "plural": "baby's",
+      "tags": [
+        "lidwoorden",
+        "meervoud"
+      ],
+      "notes": "Ends in -y, so the plural takes -'s."
+    },
+    {
+      "dutch": "hond",
+      "english": "dog",
+      "article": "de",
+      "plural": "honden",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ]
+    },
+    {
+      "dutch": "hondje",
+      "english": "little dog",
+      "article": "het",
+      "plural": "hondjes",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "de hond > het hondje > de hondjes: diminutives are het, but plurals are always de — meervoud wint!"
+    },
+    {
+      "dutch": "moeder",
+      "english": "mother",
+      "article": "de",
+      "plural": "moeders",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "de: people."
+    },
+    {
+      "dutch": "kok",
+      "english": "cook",
+      "article": "de",
+      "plural": "koks",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "de: people."
+    },
+    {
+      "dutch": "opa",
+      "english": "grandpa",
+      "article": "de",
+      "plural": "opa's",
+      "tags": [
+        "lidwoorden",
+        "meervoud"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "de: people. Ends in -a, so the plural takes -'s."
+    },
+    {
+      "dutch": "boom",
+      "english": "tree",
+      "article": "de",
+      "plural": "bomen",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "de: trees."
+    },
+    {
+      "dutch": "peer",
+      "english": "pear",
+      "article": "de",
+      "plural": "peren",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "de: fruit."
+    },
+    {
+      "dutch": "eik",
+      "english": "oak",
+      "article": "de",
+      "plural": "eiken",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "de: trees."
+    },
+    {
+      "dutch": "kastanje",
+      "english": "chestnut",
+      "article": "de",
+      "plural": "kastanjes",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "de: fruit and trees."
+    },
+    {
+      "dutch": "boompje",
+      "english": "little tree",
+      "article": "het",
+      "plural": "boompjes",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ]
+    },
+    {
+      "dutch": "hutje",
+      "english": "little hut",
+      "article": "het",
+      "plural": "hutjes",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ]
+    },
+    {
+      "dutch": "meisje",
+      "english": "girl",
+      "article": "het",
+      "plural": "meisjes",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "A girl, but still het: all diminutives are het."
+    },
+    {
+      "dutch": "kettinkje",
+      "english": "little necklace",
+      "article": "het",
+      "plural": "kettinkjes",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ]
+    },
+    {
+      "dutch": "pennetje",
+      "english": "little pen",
+      "article": "het",
+      "plural": "pennetjes",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ]
+    },
+    {
+      "dutch": "toerisme",
+      "english": "tourism",
+      "article": "het",
+      "plural": null,
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ]
+    },
+    {
+      "dutch": "amusement",
+      "english": "entertainment",
+      "article": "het",
+      "plural": null,
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ]
+    },
+    {
+      "dutch": "zonnestelsel",
+      "english": "solar system",
+      "article": "het",
+      "plural": "zonnestelsels",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ]
+    },
+    {
+      "dutch": "centrum",
+      "english": "centre",
+      "article": "het",
+      "plural": "centra",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Plural centra or centrums."
+    },
+    {
+      "dutch": "begin",
+      "english": "beginning",
+      "article": "het",
+      "plural": null,
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ]
+    },
+    {
+      "dutch": "gebruik",
+      "english": "use",
+      "article": "het",
+      "plural": null,
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ]
+    },
+    {
+      "dutch": "ontbijt",
+      "english": "breakfast",
+      "article": "het",
+      "plural": "ontbijten",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ]
+    },
+    {
+      "dutch": "gebergte",
+      "english": "mountain range",
+      "article": "het",
+      "plural": "gebergten",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ]
+    },
+    {
+      "dutch": "geboorte",
+      "english": "birth",
+      "article": "de",
+      "plural": "geboortes",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "An exception to the ge- rule: de geboorte."
+    },
+    {
+      "dutch": "verandering",
+      "english": "change",
+      "article": "de",
+      "plural": "veranderingen",
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Starts with ver-, but -ing words are de: de verandering (het veranderen = the act of changing)."
+    },
+    {
+      "dutch": "Nederlands",
+      "english": "Dutch (the language)",
+      "article": "het",
+      "plural": null,
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "het: languages."
+    },
+    {
+      "dutch": "Duits",
+      "english": "German (the language)",
+      "article": "het",
+      "plural": null,
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "het: languages."
+    },
+    {
+      "dutch": "goud",
+      "english": "gold",
+      "article": "het",
+      "plural": null,
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "het: metals."
+    },
+    {
+      "dutch": "ijzer",
+      "english": "iron",
+      "article": "het",
+      "plural": null,
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "het: metals."
+    },
+    {
+      "dutch": "zuiden",
+      "english": "south",
+      "article": "het",
+      "plural": null,
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "het: compass directions."
+    },
+    {
+      "dutch": "oosten",
+      "english": "east",
+      "article": "het",
+      "plural": null,
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "het: compass directions."
+    },
+    {
+      "dutch": "zuidwesten",
+      "english": "southwest",
+      "article": "het",
+      "plural": null,
+      "tags": [
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "het: compass directions."
+    },
+    {
+      "dutch": "wiel",
+      "english": "wheel",
+      "article": "het",
+      "plural": "wielen",
+      "tags": [
+        "meervoud"
+      ],
+      "notes": "Most plurals: -en."
+    },
+    {
+      "dutch": "schoen",
+      "english": "shoe",
+      "article": "de",
+      "plural": "schoenen",
+      "tags": [
+        "meervoud"
+      ],
+      "notes": "Most plurals: -en."
+    },
+    {
+      "dutch": "plant",
+      "english": "plant",
+      "article": "de",
+      "plural": "planten",
+      "tags": [
+        "meervoud"
+      ],
+      "notes": "Most plurals: -en."
+    },
+    {
+      "dutch": "kind",
+      "english": "child",
+      "article": "het",
+      "plural": "kinderen",
+      "tags": [
+        "meervoud",
+        "lidwoorden"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Plural -eren (not kinden)."
+    },
+    {
+      "dutch": "blad",
+      "english": "leaf",
+      "article": "het",
+      "plural": "bladeren",
+      "tags": [
+        "meervoud"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Plural -eren."
+    },
+    {
+      "dutch": "ei",
+      "english": "egg",
+      "article": "het",
+      "plural": "eieren",
+      "tags": [
+        "meervoud"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Plural -eren."
+    },
+    {
+      "dutch": "been",
+      "english": "bone; leg",
+      "article": "het",
+      "plural": "beenderen",
+      "tags": [
+        "meervoud"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Plural -eren: beenderen (bones). For legs it's benen."
+    },
+    {
+      "dutch": "vlinder",
+      "english": "butterfly",
+      "article": "de",
+      "plural": "vlinders",
+      "tags": [
+        "meervoud"
+      ],
+      "notes": "Ends in -er, so the plural takes -s."
+    },
+    {
+      "dutch": "niveau",
+      "english": "level",
+      "article": "het",
+      "plural": "niveaus",
+      "tags": [
+        "meervoud"
+      ],
+      "notes": "Ends in -eau, so the plural takes -s."
+    },
+    {
+      "dutch": "taxi",
+      "english": "taxi",
+      "article": "de",
+      "plural": "taxi's",
+      "tags": [
+        "meervoud"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Ends in -i, so the plural takes -'s."
+    },
+    {
+      "dutch": "ski",
+      "english": "ski",
+      "article": "de",
+      "plural": "ski's",
+      "tags": [
+        "meervoud"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Ends in -i, so the plural takes -'s."
+    },
+    {
+      "dutch": "essay",
+      "english": "essay",
+      "article": "de",
+      "plural": "essays",
+      "tags": [
+        "meervoud"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Vowel before the y, so just -s. Your handout says de essay; het essay is also correct."
+    },
+    {
+      "dutch": "jockey",
+      "english": "jockey",
+      "article": "de",
+      "plural": "jockeys",
+      "tags": [
+        "meervoud"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Vowel before the y, so just -s."
+    },
+    {
+      "dutch": "stad",
+      "english": "city",
+      "article": "de",
+      "plural": "steden",
+      "tags": [
+        "meervoud"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Irregular: the vowel changes (stad → steden)."
+    },
+    {
+      "dutch": "schip",
+      "english": "ship",
+      "article": "het",
+      "plural": "schepen",
+      "tags": [
+        "meervoud"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Irregular: the vowel changes (schip → schepen)."
+    },
+    {
+      "dutch": "lid",
+      "english": "member",
+      "article": "het",
+      "plural": "leden",
+      "tags": [
+        "meervoud"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Irregular: the vowel changes (lid → leden)."
+    },
+    {
+      "dutch": "god",
+      "english": "god",
+      "article": "de",
+      "plural": "goden",
+      "tags": [
+        "meervoud"
+      ],
+      "ai": [
+        "english"
+      ],
+      "notes": "Irregular: the vowel changes (god → goden)."
+    }
+  ]
+}
