@@ -8,6 +8,7 @@ import { PlayButton } from "@/components/play-button";
 import { fromFsrsCard, Rating, scheduler, toFsrsCard, type CardFields, type Grade } from "@/lib/fsrs";
 import { requeuePosition } from "@/lib/lesson";
 import { articleRule, PLURAL_RULE } from "@/lib/articles";
+import { checkTypedAnswer, type CheckResult } from "@/lib/answer-check";
 import type { Article, Auxiliary, CardKind, WordType } from "@/lib/database.types";
 import { gradeCard, loadLesson, loadNewCards } from "./actions";
 
@@ -39,8 +40,9 @@ const SWIPE_THRESHOLD = 80;
 //                      and sooner on later days
 // Swipe right for Got it, left for Still learning.
 //
-// "de of het?" cards are answered by tapping de or het instead: right counts as
-// Got it, wrong as Still learning, and the rule behind the answer is shown.
+// "de of het?" cards are answered by tapping de or het instead, and English →
+// Dutch cards by typing the Dutch. Right counts as Got it, wrong as Still
+// learning, and the correct answer (and any rule behind it) is shown.
 export function Session({
   items,
   streak,
@@ -58,6 +60,9 @@ export function Session({
   const [lessonNumber, setLessonNumber] = useState(1);
   const [revealed, setRevealed] = useState(false);
   const [choice, setChoice] = useState<Article | null>(null); // for de/het cards
+  const [typed, setTyped] = useState(""); // for English → Dutch cards
+  const [checked, setChecked] = useState<CheckResult | null>(null);
+  const [override, setOverride] = useState(false); // "Count it as right"
   const [phase, setPhase] = useState<"cards" | "saving" | "summary">("cards");
   const [tally, setTally] = useState({ gotIt: 0, missedWords: new Set<string>(), newWords: new Set<string>() });
   const [saveFailed, setSaveFailed] = useState(0);
@@ -71,7 +76,11 @@ export function Session({
   const seenCardIds = useRef(new Set(items.map((i) => i.card.id)));
   const current = queue[0];
   const isArticleCard = current?.card.kind === "article";
+  const isTypingCard = current?.card.kind === "produce";
   const articleCorrect = choice !== null && choice === current?.entry.article;
+  // Cards you answer (rather than flip and self-grade), and what the answer was.
+  const needsAnswer = (isArticleCard && !choice) || (isTypingCard && !checked);
+  const verdict = isArticleCard ? articleCorrect : Boolean(checked?.correct || override);
   const remainingCards = new Set(queue.map((i) => i.card.id)).size;
   const done = lessonSize - remainingCards;
 
@@ -149,6 +158,12 @@ export function Session({
         setQueue(rest);
         setRevealed(false);
         setChoice(null);
+    setTyped("");
+    setChecked(null);
+    setOverride(false);
+        setTyped("");
+        setChecked(null);
+        setOverride(false);
         setDragX(0);
         setSettling(false);
         if (rest.length === 0) finish();
@@ -156,6 +171,12 @@ export function Session({
     },
     [current, queue, save, settling, finish],
   );
+
+  function checkTyped(giveUp = false) {
+    if (!current || checked || settling) return;
+    setChecked(giveUp ? { ...checkTypedAnswer("", current.entry), note: null } : checkTypedAnswer(typed, current.entry));
+    setRevealed(true);
+  }
 
   function chooseArticle(article: Article) {
     if (choice || settling) return;
@@ -171,7 +192,7 @@ export function Session({
   const swipeHandlers = {
     onPointerDown(event: React.PointerEvent<HTMLElement>) {
       if (settling || (event.pointerType === "mouse" && event.button !== 0)) return;
-      if (isArticleCard && !choice) return; // pick de or het first
+      if (needsAnswer) return; // answer first: pick de/het or type the word
       drag.current = { x: event.clientX, y: event.clientY, id: event.pointerId, horizontal: null };
     },
     onPointerMove(event: React.PointerEvent<HTMLElement>) {
@@ -196,8 +217,8 @@ export function Session({
       if (!d?.horizontal) return;
       suppressTap.current = true; // the click after a swipe shouldn't flip the card
       setTimeout(() => (suppressTap.current = false), 50);
-      // A de/het card is already marked; either direction moves on.
-      if (isArticleCard && Math.abs(dragX) >= SWIPE_THRESHOLD) answer(articleCorrect);
+      // An answered card is already marked; either direction moves on.
+      if ((isArticleCard || isTypingCard) && Math.abs(dragX) >= SWIPE_THRESHOLD) answer(verdict);
       else if (dragX >= SWIPE_THRESHOLD) answer(true);
       else if (dragX <= -SWIPE_THRESHOLD) answer(false);
       else setDragX(0);
@@ -210,9 +231,9 @@ export function Session({
   };
 
   const tapFlip = useCallback(() => {
-    if (suppressTap.current || (isArticleCard && !choice)) return;
+    if (suppressTap.current || needsAnswer || isTypingCard) return;
     flip();
-  }, [flip, isArticleCard, choice]);
+  }, [flip, needsAnswer, isTypingCard]);
 
   // Space flips; → got it, ← still learning (for a laptop keyboard).
   useEffect(() => {
@@ -220,6 +241,7 @@ export function Session({
       if (phase !== "cards" || !current || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
       const target = event.target;
       if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable=true]")) return;
+      if (isTypingCard) return; // the answer box handles its own keys
       if (isArticleCard) {
         // d / h to answer, then Enter or → to continue.
         if (!choice && (event.key === "d" || event.key === "h")) chooseArticle(event.key === "d" ? "de" : "het");
@@ -243,7 +265,7 @@ export function Session({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- chooseArticle only reads state listed here
-  }, [phase, current, answer, flip, isArticleCard, choice, articleCorrect]);
+  }, [phase, current, answer, flip, isArticleCard, isTypingCard, choice, articleCorrect]);
 
   // --- Next lesson ------------------------------------------------------------
 
@@ -330,7 +352,7 @@ export function Session({
           <span className="tabular-nums" aria-live="polite">
             {remainingCards} to go
           </span>
-          {current.card.state === 0 && !isArticleCard && (
+          {current.card.state === 0 && current.card.kind === "recognise" && (
             <span className="rounded-full bg-accent-soft px-2 py-0.5 text-ink">New word</span>
           )}
           <button type="button" onClick={finish} className="-mr-2 flex size-10 items-center justify-center" aria-label="End lesson">
@@ -349,6 +371,13 @@ export function Session({
         item={current}
         revealed={revealed}
         choice={choice}
+        typing={{
+          value: typed,
+          onChange: setTyped,
+          checked,
+          onCheck: () => checkTyped(),
+          onNext: () => answer(verdict),
+        }}
         onFlip={tapFlip}
         dragX={dragX}
         dragging={dragging}
@@ -369,6 +398,21 @@ export function Session({
           <button type="button" className="btn-primary min-h-14" onClick={() => answer(articleCorrect)} disabled={settling}>
             Next
           </button>
+        ) : isTypingCard && !checked ? (
+          <button type="button" className="btn-ghost w-full" onClick={() => checkTyped(true)}>
+            I don&rsquo;t know — show me
+          </button>
+        ) : isTypingCard ? (
+          <div className="flex flex-col gap-2">
+            <button type="button" className="btn-primary min-h-14" onClick={() => answer(verdict)} disabled={settling}>
+              Next
+            </button>
+            {!checked?.correct && !override && typed.trim() && (
+              <button type="button" className="btn-ghost" onClick={() => setOverride(true)}>
+                I was right — count it
+              </button>
+            )}
+          </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
             <button type="button" className="btn-secondary min-h-14 text-ink" onClick={() => answer(false)} disabled={settling}>
@@ -388,6 +432,7 @@ function CardFace({
   item,
   revealed,
   choice,
+  typing,
   onFlip,
   dragX,
   dragging,
@@ -396,6 +441,7 @@ function CardFace({
   item: SessionItem;
   revealed: boolean;
   choice: Article | null;
+  typing: TypingProps;
   onFlip: () => void;
   dragX: number;
   dragging: boolean;
@@ -403,6 +449,11 @@ function CardFace({
 }) {
   const { entry, card, example } = item;
   const spoken = entry.article ? `${entry.article} ${entry.dutch}` : entry.dutch;
+  if (card.kind === "produce") {
+    return (
+      <TypingCardFace entry={entry} example={example} typing={typing} dragX={dragX} dragging={dragging} swipeHandlers={swipeHandlers} />
+    );
+  }
   if (card.kind === "article" && entry.article) {
     return (
       <ArticleCardFace
@@ -499,6 +550,122 @@ function CardFace({
           <p className="text-center text-xs text-muted">
             {revealed ? "Tap to flip back" : "Tap to check"} · swipe right if you knew it
           </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+type TypingProps = {
+  value: string;
+  onChange: (value: string) => void;
+  checked: CheckResult | null;
+  onCheck: () => void;
+  onNext: () => void;
+};
+
+// English → Dutch: type the word (with de/het for nouns), then see the answer.
+// The box sits on the card rather than at the bottom so the phone keyboard
+// doesn't cover it.
+function TypingCardFace({
+  entry,
+  example,
+  typing,
+  dragX,
+  dragging,
+  swipeHandlers,
+}: {
+  entry: SessionItem["entry"];
+  example: SessionItem["example"];
+  typing: TypingProps;
+  dragX: number;
+  dragging: boolean;
+  swipeHandlers: React.HTMLAttributes<HTMLElement>;
+}) {
+  const { checked } = typing;
+  const isNoun = entry.word_type === "noun" && entry.article;
+  const spoken = entry.article ? `${entry.article} ${entry.dutch}` : entry.dutch;
+  return (
+    <section aria-label="Type the Dutch" className="flex flex-1 overflow-x-clip px-5 py-4">
+      <div
+        {...swipeHandlers}
+        className={`relative flex min-h-64 min-w-0 flex-1 animate-[card-in_200ms_ease-out] flex-col rounded-3xl border bg-card p-6 ${
+          !checked ? "border-line" : checked.correct ? "border-accent" : "border-warn"
+        }`}
+        style={{
+          touchAction: "pan-y",
+          transform: dragX ? `translateX(${dragX}px) rotate(${Math.max(-4, Math.min(4, dragX / 40))}deg)` : undefined,
+          transition: dragging ? "none" : "transform 180ms ease-out, opacity 180ms ease-out",
+          opacity: dragX ? Math.max(0.3, 1 - Math.abs(dragX) / 500) : undefined,
+        }}
+      >
+        <p className="text-xs tracking-wide text-muted">English → Dutch</p>
+        <div className="flex flex-1 flex-col justify-center gap-5 py-6">
+          <div>
+            <h1 className="text-3xl leading-snug break-words">{entry.english}</h1>
+            <p className="mt-1 text-sm text-muted">{isNoun ? "noun — type it with de or het" : entry.word_type}</p>
+          </div>
+
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (checked) typing.onNext();
+              else typing.onCheck();
+            }}
+          >
+            <input
+              value={typing.value}
+              onChange={(e) => typing.onChange(e.target.value)}
+              readOnly={Boolean(checked)}
+              autoFocus
+              autoCapitalize="off"
+              autoCorrect="off"
+              autoComplete="off"
+              spellCheck={false}
+              enterKeyHint={checked ? "next" : "done"}
+              lang="nl"
+              aria-label="Your answer in Dutch"
+              placeholder={isNoun ? "de … / het …" : "In Dutch"}
+              className={`field font-dutch text-xl ${checked ? (checked.correct ? "border-accent" : "border-warn") : ""}`}
+            />
+            {!checked && (
+              <button className="btn-secondary shrink-0 border-accent px-4 text-accent" disabled={!typing.value.trim()}>
+                Check
+              </button>
+            )}
+          </form>
+
+          {checked && (
+            <div aria-live="polite">
+              <p className={`flex items-center gap-1.5 ${checked.correct ? "text-accent" : "text-warn"}`}>
+                {checked.correct ? <Check className="size-4" aria-hidden /> : <RotateCcw className="size-4" aria-hidden />}
+                {checked.correct ? "Right" : typing.value.trim() ? "Not quite" : "Here it is"}
+                {checked.note && <span className="text-muted">· {checked.note}</span>}
+              </p>
+              <div className="mt-3 flex items-start gap-2">
+                <p className="min-w-0 text-[2rem] leading-tight break-words">
+                  <DutchTerm dutch={entry.dutch} article={entry.article} />
+                </p>
+                <PlayButton text={spoken} className="mt-0.5" />
+              </div>
+              <Grammar entry={entry} />
+              {entry.notes && <p className="mt-2 text-sm text-muted">{entry.notes}</p>}
+              {example && (
+                <div className="mt-4">
+                  <div className="flex items-start gap-1">
+                    <p className="min-w-0 font-dutch text-lg leading-snug break-words text-ink/80">{example.dutch}</p>
+                    <PlayButton text={example.dutch} size="sm" />
+                  </div>
+                  {example.english && (
+                    <p className="text-sm text-muted">
+                      {example.english} {example.ai && <AiBadge />}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </section>
