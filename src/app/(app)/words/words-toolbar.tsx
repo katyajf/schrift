@@ -20,7 +20,13 @@ const TYPE_CHIPS: { value: WordType; label: string }[] = [
   { value: "phrase", label: "Phrases" },
 ];
 
-export function WordsToolbar({ tags }: { tags: { id: string; name: string }[] }) {
+export function WordsToolbar({
+  tags,
+  sets = [],
+}: {
+  tags: { id: string; name: string }[];
+  sets?: { id: string; title: string | null }[];
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -70,7 +76,7 @@ export function WordsToolbar({ tags }: { tags: { id: string; name: string }[] })
       <div className="-mx-5 flex gap-2 overflow-x-auto px-5 [scrollbar-width:none]">
         {searchParams.get("page") && (
           <button className="chip" aria-pressed onClick={() => navigate({ page: null })}>
-            From one page <X className="size-3.5" aria-hidden />
+            {sets.find((s) => s.id === searchParams.get("page"))?.title ?? "One set"} <X className="size-3.5" aria-hidden />
           </button>
         )}
         <button className="chip" aria-pressed={isActive("added", "7")} onClick={() => toggle("added", "7")}>

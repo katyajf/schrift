@@ -8,7 +8,7 @@ export default function ScanPage() {
   return (
     <main className="flex flex-1 flex-col px-5 pt-8">
       <h1 className="font-dutch text-3xl">Scan</h1>
-      <p className="mt-1 text-muted">Photograph notebook pages and turn them into words.</p>
+      <p className="mt-1 text-muted">Photograph notebook pages, or add a PDF handout, and turn them into words.</p>
       <Suspense fallback={<ScanUploader userId="" pending={[]} loading />}>
         <ScanContent />
       </Suspense>
@@ -20,7 +20,7 @@ async function ScanContent() {
   const { supabase, userId } = await requireUser();
   const { data: pages } = await supabase
     .from("pages")
-    .select("id, status, storage_path, error, extraction, created_at")
+    .select("id, status, storage_path, error, extraction, created_at, source, title")
     .in("status", ["uploaded", "extracting", "review", "failed"])
     .order("created_at", { ascending: false })
     .limit(20);
@@ -38,7 +38,9 @@ async function ScanContent() {
       status: p.status === "extracting" ? "uploaded" : p.status,
       error: p.error,
       count: extraction?.entries?.length,
-      previewUrl: signed?.[i]?.signedUrl ?? null,
+      previewUrl: p.source === "pdf" ? null : (signed?.[i]?.signedUrl ?? null),
+      isPdf: p.source === "pdf",
+      name: p.title,
     };
   });
 

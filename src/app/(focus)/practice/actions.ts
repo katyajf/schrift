@@ -63,14 +63,19 @@ export async function gradeCard(input: unknown): Promise<{ ok: true } | { ok: fa
 const MoreInput = z.object({
   exclude: z.array(z.uuid()).max(2000),
   count: z.number().int().min(1).max(50).default(10),
+  setId: z.uuid().nullable().default(null),
 });
+
+const LessonInput = z.object({ setId: z.uuid().nullable().default(null) }).default({ setId: null });
 
 // "Another lesson" at the end: a freshly picked and shuffled lesson. Call it
 // after the answers from the last one are saved, so it sees their new due dates.
-export async function loadLesson(): Promise<{ items: SessionItem[] } | { error: string }> {
+export async function loadLesson(input?: unknown): Promise<{ items: SessionItem[] } | { error: string }> {
+  const parsed = LessonInput.safeParse(input);
+  if (!parsed.success) return { error: "Invalid request." };
   const { supabase } = await requireUser();
   try {
-    return { items: await loadLessonItems(supabase) };
+    return { items: await loadLessonItems(supabase, parsed.data.setId) };
   } catch (error) {
     console.error("lesson_cards failed", error);
     return { error: "Couldn't load a new lesson." };
@@ -82,10 +87,13 @@ export async function loadLesson(): Promise<{ items: SessionItem[] } | { error: 
 export async function loadNewCards(input: unknown): Promise<{ items: SessionItem[] } | { error: string }> {
   const parsed = MoreInput.safeParse(input);
   if (!parsed.success) return { error: "Invalid request." };
-  const { exclude, count } = parsed.data;
+  const { exclude, count, setId } = parsed.data;
   const { supabase } = await requireUser();
 
-  const { data: cards, error } = await supabase.rpc("random_new_cards", { p_exclude: exclude, p_limit: count });
+  const { data: cards, error } = await supabase.rpc(
+    "random_new_cards",
+    setId ? { p_exclude: exclude, p_limit: count, p_page_id: setId } : { p_exclude: exclude, p_limit: count },
+  );
   if (error) {
     console.error("random_new_cards failed", error);
     return { error: "Couldn't load new words." };

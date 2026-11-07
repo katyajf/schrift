@@ -62,7 +62,7 @@ function rewriteTypeArrays(node: unknown): unknown {
 
 const EXTRACTION_SCHEMA = toResponseSchema(ExtractionResultSchema);
 
-const EXTRACTION_PROMPT = `You are reading a photo of a handwritten vocabulary notebook page from a learner of Dutch (Netherlands Dutch, level A2 working towards B1).
+const EXTRACTION_PROMPT = `You are reading a photo of a handwritten vocabulary notebook page (or occasionally a typed handout) from a learner of Dutch (Netherlands Dutch, level A2 working towards B1).
 
 Layout: usually the Dutch word or phrase on the left and the English meaning on the right. Nouns sometimes have "de" or "het" written before them. A short example sentence is sometimes written underneath an entry; it belongs to the entry above it. Handwriting can be messy and some words are crossed out.
 
@@ -76,7 +76,8 @@ Rules:
 - Verbs: "dutch" is the infinitive as written. Keep reflexive "zich" and separable particles as written.
 - Multi-word expressions ("hoe gaat het?", "op tijd") are word_type "phrase".
 - Set "unsure" to true when you had to guess at the handwriting.
-- If the page has no vocabulary, return an empty list.`;
+- If the page has no vocabulary, return an empty list.
+- If this is a typed document such as a tutor's handout (often a PDF) rather than a notebook page, extract the vocabulary it teaches: example nouns with their article and plural, verbs, phrases. Skip headings, rule explanations and words shown only as mistakes (crossed out).`;
 
 export async function extractEntriesFromImage(
   image: { data: Uint8Array; mimeType: string },

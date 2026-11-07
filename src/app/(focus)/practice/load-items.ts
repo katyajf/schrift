@@ -7,8 +7,12 @@ import type { SessionItem } from "./session";
 export const LESSON_SIZE = 15;
 
 // A fresh lesson: picked by the database (due, new, refreshers), ordered here.
-export async function loadLessonItems(supabase: SupabaseClient<Database>): Promise<SessionItem[]> {
-  const { data: cards, error } = await supabase.rpc("lesson_cards", { p_size: LESSON_SIZE });
+// With a set id, only words from that set.
+export async function loadLessonItems(supabase: SupabaseClient<Database>, setId?: string | null): Promise<SessionItem[]> {
+  const { data: cards, error } = await supabase.rpc(
+    "lesson_cards",
+    setId ? { p_size: LESSON_SIZE, p_page_id: setId } : { p_size: LESSON_SIZE },
+  );
   if (error) throw error;
   return arrangeLesson(await toSessionItems(supabase, cards ?? []));
 }

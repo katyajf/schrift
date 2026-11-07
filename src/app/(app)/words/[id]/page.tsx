@@ -33,7 +33,7 @@ async function Word({ params }: Pick<PageProps<"/words/[id]">, "params">) {
   const { supabase } = await requireUser();
 
   const [{ data: entry }, { data: examples }, { data: entryTags }, { data: allTags }, { data: cards }] = await Promise.all([
-    supabase.from("entries").select("*, pages(storage_path, created_at)").eq("id", id).maybeSingle(),
+    supabase.from("entries").select("*, pages(storage_path, created_at, title, lesson_date, source)").eq("id", id).maybeSingle(),
     supabase.from("example_sentences").select("*").eq("entry_id", id).order("position"),
     supabase.from("entry_tags").select("tag_id, tags(id, name)").eq("entry_id", id),
     supabase.from("tags").select("id, name").order("name"),
@@ -45,7 +45,13 @@ async function Word({ params }: Pick<PageProps<"/words/[id]">, "params">) {
   ]);
   if (!entry) notFound();
 
-  const page = entry.pages as { storage_path: string; created_at: string } | null;
+  const page = entry.pages as {
+    storage_path: string;
+    created_at: string;
+    title: string | null;
+    lesson_date: string;
+    source: "photo" | "pdf";
+  } | null;
   const { data: signed } = page
     ? await supabase.storage.from("pages").createSignedUrl(page.storage_path, 3600)
     : { data: null };
@@ -117,7 +123,15 @@ async function Word({ params }: Pick<PageProps<"/words/[id]">, "params">) {
         </section>
       )}
 
-      {signed?.signedUrl && entry.page_id && <SourcePhoto url={signed.signedUrl} pageId={entry.page_id} />}
+      {page && entry.page_id && (
+        <SourcePhoto
+          url={signed?.signedUrl ?? null}
+          pageId={entry.page_id}
+          setTitle={page.title ?? "Untitled set"}
+          lessonDate={page.lesson_date}
+          isPdf={page.source === "pdf"}
+        />
+      )}
 
       <p className="text-xs text-muted">
         Added {new Date(entry.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
@@ -130,7 +144,7 @@ async function Word({ params }: Pick<PageProps<"/words/[id]">, "params">) {
 
 type HistoryCard = {
   id: string;
-  kind: "recognise" | "produce";
+  kind: "recognise" | "produce" | "article";
   state: number;
   due: string;
   reps: number;
@@ -141,7 +155,8 @@ type HistoryCard = {
 // 1–4 are FSRS grades; lessons record "Still learning" as 1 and "Got it" as 3.
 // 2 and 4 come from the earlier grading buttons and the old "Learned" button.
 const RATING_LABEL = ["", "Still learning", "Hard", "Got it", "Learned"];
-const DIRECTION = { recognise: "Dutch → English", produce: "English → Dutch" };
+const DIRECTION = { recognise: "Dutch → English", produce: "English → Dutch", article: "de of het?" };
+const SHORT_DIRECTION = { recognise: "NL → EN", produce: "EN → NL", article: "de/het" };
 
 // Request-time render, so reading the clock here is intended.
 function nextReview(card: HistoryCard) {
@@ -189,7 +204,7 @@ function PracticeHistory({ cards }: { cards: HistoryCard[] }) {
             <li key={i} className="flex justify-between gap-4 text-muted">
               <span>
                 {new Date(l.reviewed_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} ·{" "}
-                {l.kind === "recognise" ? "NL → EN" : "EN → NL"}
+                {SHORT_DIRECTION[l.kind]}
               </span>
               <span className={l.rating === 1 ? "text-warn" : "text-ink"}>{RATING_LABEL[l.rating]}</span>
             </li>

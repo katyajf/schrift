@@ -20,7 +20,7 @@ export async function discardPage(pageId: string) {
 export async function saveReviewedPage(input: unknown): Promise<{ error: string } | void> {
   const parsed = SavePageSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Some entries are invalid." };
-  const { pageId, entries } = parsed.data;
+  const { pageId, entries, set } = parsed.data;
   const { supabase } = await requireUser();
 
   // The article lives in its own column, so "de appel" is stored as "appel".
@@ -29,6 +29,12 @@ export async function saveReviewedPage(input: unknown): Promise<{ error: string 
     if (!match || e.word_type !== "noun") return e;
     return { ...e, dutch: match[2], article: e.article ?? (match[1].toLowerCase() as "de" | "het") };
   });
+
+  const { error: setError } = await supabase
+    .from("pages")
+    .update({ title: set.title, lesson_date: set.lessonDate })
+    .eq("id", pageId);
+  if (setError) return { error: "Couldn't save the set name. Try again." };
 
   const { error } = await supabase.rpc("save_page_entries", {
     p_page_id: pageId,
@@ -39,5 +45,5 @@ export async function saveReviewedPage(input: unknown): Promise<{ error: string 
     return { error: "Couldn't save. Your edits are still here — try again." };
   }
 
-  redirect(`/words?page=${pageId}`);
+  redirect(`/words/sets/${pageId}`);
 }

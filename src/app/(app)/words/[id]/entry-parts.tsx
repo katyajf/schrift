@@ -6,6 +6,7 @@ import { ChevronDown, Plus, Trash2, X } from "lucide-react";
 import { AiBadge } from "@/components/dutch-term";
 import { PlayButton } from "@/components/play-button";
 import { AUXILIARIES, WORD_TYPES } from "@/lib/entry-schema";
+import { formatLessonDate } from "@/lib/dates";
 import type { EntryRow, ExampleSentenceRow } from "@/lib/database.types";
 import { addExample, addTag, deleteEntry, deleteExample, removeTag, updateEntry } from "../actions";
 
@@ -139,24 +140,45 @@ export function TagEditor({
   );
 }
 
-export function SourcePhoto({ url, pageId }: { url: string; pageId: string }) {
+export function SourcePhoto({
+  url,
+  pageId,
+  setTitle,
+  lessonDate,
+  isPdf,
+}: {
+  url: string | null;
+  pageId: string;
+  setTitle: string;
+  lessonDate: string;
+  isPdf: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <section>
-      <button className="flex w-full items-center justify-between text-sm text-muted" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        Source page
-        <ChevronDown className={`size-4 transition ${open ? "rotate-180" : ""}`} aria-hidden />
-      </button>
-      {open && (
-        <div className="mt-3 flex flex-col gap-2">
-          <a href={url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-2xl border border-line">
-            {/* eslint-disable-next-line @next/next/no-img-element -- signed storage URL */}
-            <img src={url} alt="Notebook page this word came from" className="w-full" />
-          </a>
-          <Link href={`/words?page=${pageId}`} className="text-sm text-accent">
-            All words from this page
-          </Link>
-        </div>
+      <h2 className="mb-1 text-sm text-muted">From the set</h2>
+      <Link href={`/words/sets/${pageId}`} className="font-dutch text-lg text-accent">
+        {setTitle}
+      </Link>
+      <span className="text-sm text-muted"> · {formatLessonDate(lessonDate, "short")}</span>
+      {url && !isPdf && (
+        <>
+          <button className="mt-2 flex w-full items-center justify-between text-sm text-muted" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+            Photo
+            <ChevronDown className={`size-4 transition ${open ? "rotate-180" : ""}`} aria-hidden />
+          </button>
+          {open && (
+            <a href={url} target="_blank" rel="noreferrer" className="mt-3 block overflow-hidden rounded-2xl border border-line">
+              {/* eslint-disable-next-line @next/next/no-img-element -- signed storage URL */}
+              <img src={url} alt="Notebook page this word came from" className="w-full" />
+            </a>
+          )}
+        </>
+      )}
+      {url && isPdf && (
+        <a href={url} target="_blank" rel="noreferrer" className="mt-2 block text-sm text-accent">
+          Open the PDF
+        </a>
       )}
     </section>
   );

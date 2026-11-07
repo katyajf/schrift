@@ -101,11 +101,14 @@ export function ReviewEditor({
   pageId,
   photoUrl,
   extraction,
+  initialSet,
 }: {
   pageId: string;
   photoUrl: string | null;
   extraction: PageExtraction;
+  initialSet: { title: string; lessonDate: string };
 }) {
+  const [setDetails, setSetDetails] = useState(initialSet);
   const [rows, setRows] = useState<Row[]>(() =>
     extraction.entries.map((e, i) => toRow(e, i, extraction.matches[String(i)] ?? [])),
   );
@@ -158,7 +161,7 @@ export function ReviewEditor({
       return;
     }
     startSaving(async () => {
-      const result = await saveReviewedPage({ pageId, entries: toSave.map(toPayload) });
+      const result = await saveReviewedPage({ pageId, entries: toSave.map(toPayload), set: setDetails });
       if (result?.error) setError(result.error);
     });
   }
@@ -187,6 +190,29 @@ export function ReviewEditor({
           <img src={photoUrl} alt="Notebook page" className="size-full object-cover object-top" />
         </button>
       )}
+
+      {/* Name and date the set, so its words can be found and practised together later. */}
+      <div className="grid grid-cols-[1fr_auto] gap-3 px-5 pt-5">
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm text-muted">Set name</span>
+          <input
+            className="field"
+            value={setDetails.title}
+            onChange={(e) => setSetDetails((d) => ({ ...d, title: e.target.value }))}
+            placeholder="Restaurant vocab"
+            maxLength={120}
+          />
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm text-muted">Lesson date</span>
+          <input
+            type="date"
+            className="field"
+            value={setDetails.lessonDate}
+            onChange={(e) => setSetDetails((d) => ({ ...d, lessonDate: e.target.value }))}
+          />
+        </label>
+      </div>
 
       <div className="px-5 pt-5 pb-2">
         <h1 className="font-dutch text-2xl">Review words</h1>

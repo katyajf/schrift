@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { PageExtractionSchema } from "@/lib/entry-schema";
+import { formatLessonDate } from "@/lib/dates";
 import { ReviewEditor } from "./review-editor";
 
 export const metadata = { title: "Review words" };
@@ -27,7 +28,7 @@ async function Review({ params }: Pick<PageProps<"/scan/[pageId]">, "params">) {
   const { supabase } = await requireUser();
   const { data: page } = await supabase
     .from("pages")
-    .select("id, status, storage_path, extraction, error")
+    .select("id, status, storage_path, extraction, error, title, lesson_date, source, created_at")
     .eq("id", pageId)
     .maybeSingle();
   if (!page) notFound();
@@ -56,7 +57,19 @@ async function Review({ params }: Pick<PageProps<"/scan/[pageId]">, "params">) {
 
   const { data: signed } = await supabase.storage.from("pages").createSignedUrl(page.storage_path, 3600);
 
-  return <ReviewEditor pageId={page.id} photoUrl={signed?.signedUrl ?? null} extraction={extraction.data} />;
+  return (
+    <ReviewEditor
+      pageId={page.id}
+      photoUrl={page.source === "pdf" ? null : (signed?.signedUrl ?? null)}
+      extraction={extraction.data}
+      initialSet={{ title: page.title ?? defaultSetTitle(page.source, page.lesson_date), lessonDate: page.lesson_date }}
+    />
+  );
+}
+
+// "Notebook · 7 Nov" until you name it.
+function defaultSetTitle(source: string, lessonDate: string) {
+  return `${source === "pdf" ? "Handout" : "Notebook"} · ${formatLessonDate(lessonDate, "short")}`;
 }
 
 function Message({ title, children }: { title: string; children: React.ReactNode }) {

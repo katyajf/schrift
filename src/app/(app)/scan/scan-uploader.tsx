@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { AlertCircle, Camera, ChevronRight, ImagePlus, Loader2, RotateCw, X } from "lucide-react";
+import { AlertCircle, Camera, ChevronRight, FileText, ImagePlus, Loader2, RotateCw, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { compressImage } from "@/lib/image";
 import type { PageStatus } from "@/lib/database.types";
@@ -14,7 +14,17 @@ export type PendingPage = {
   error: string | null;
   count?: number;
   previewUrl: string | null;
+  isPdf?: boolean;
+  name?: string | null;
 };
+
+// Must match the storage bucket's file_size_limit.
+const MAX_PDF_BYTES = 15 * 1024 * 1024;
+
+// "Nederlands_Lidwoorden_UITLEG (1).pdf" -> "Nederlands Lidwoorden UITLEG"
+function titleFromFileName(name: string) {
+  return name.replace(/\.pdf$/i, "").replace(/\s*\(\d+\)$/, "").replace(/[_-]+/g, " ").trim().slice(0, 120) || "Handout";
+}
 
 type Step = "preparing" | "uploading" | PageStatus;
 type Item = Omit<PendingPage, "status"> & { status: Step };
@@ -69,19 +79,28 @@ export function ScanUploader({
     const file = files.current.get(id);
     if (!file) return extract(id);
     const supabase = createClient();
-    const path = `${userId}/${id}.jpg`;
+    // PDFs (e.g. tutor handouts) go up as they are; photos are shrunk first.
+    const isPdf = file.type === "application/pdf";
+    const path = `${userId}/${id}.${isPdf ? "pdf" : "jpg"}`;
 
     try {
       update(id, { status: "preparing", error: null });
-      const blob = await compressImage(file);
+      if (isPdf && file.size > MAX_PDF_BYTES) throw new Error("This PDF is over 15 MB. Try a smaller file.");
+      const blob = isPdf ? file : await compressImage(file);
 
       update(id, { status: "uploading" });
       const { error: uploadError } = await supabase.storage
         .from("pages")
-        .upload(path, blob, { contentType: "image/jpeg", upsert: true });
+        .upload(path, blob, { contentType: isPdf ? "application/pdf" : "image/jpeg", upsert: true });
       if (uploadError) throw new Error("Upload failed. Check your connection.");
 
-      const { error: insertError } = await supabase.from("pages").upsert({ id, storage_path: path });
+      const { error: insertError } = await supabase
+        .from("pages")
+        .upsert(
+          isPdf
+            ? { id, storage_path: path, source: "pdf" as const, title: titleFromFileName(file.name) }
+            : { id, storage_path: path },
+        );
       if (insertError) throw new Error("Couldn't save the page.");
     } catch (error) {
       update(id, { status: "failed", error: error instanceof Error ? error.message : "Something went wrong." });
@@ -111,7 +130,8 @@ export function ScanUploader({
     const added: Item[] = [...list].map((file) => {
       const id = crypto.randomUUID();
       files.current.set(id, file);
-      return { id, status: "preparing", error: null, previewUrl: URL.createObjectURL(file) };
+      const isPdf = file.type === "application/pdf";
+      return { id, status: "preparing", error: null, previewUrl: isPdf ? null : URL.createObjectURL(file), isPdf, name: file.name };
     });
     setItems((current) => [...added, ...current]);
     added.forEach((item) => enqueue(item.id));
@@ -161,10 +181,10 @@ export function ScanUploader({
         </label>
         <label className="btn-secondary cursor-pointer">
           <ImagePlus className="size-5" aria-hidden />
-          Choose photos
+          Choose photos or PDFs
           <input
             type="file"
-            accept="image/*"
+            accept="image/*,application/pdf"
             multiple
             className="sr-only"
             disabled={loading}
@@ -183,15 +203,16 @@ const STATUS_TEXT: Partial<Record<Step, string>> = {
   preparing: "Preparing photo…",
   uploading: "Uploading…",
   uploaded: "Waiting to be read",
-  extracting: "Reading handwriting…",
+  extracting: "Reading…",
 };
 
 function PageRow({ item, onRetry, onDiscard }: { item: Item; onRetry: () => void; onDiscard: () => void }) {
   const working = ["preparing", "uploading", "extracting"].includes(item.status);
 
   const thumb = (
-    <div className="size-16 shrink-0 overflow-hidden rounded-lg bg-sunken">
-      {item.previewUrl && (
+    <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sunken">
+      {item.isPdf && <FileText className="size-7 text-muted" aria-hidden />}
+      {!item.isPdf && item.previewUrl && (
         // eslint-disable-next-line @next/next/no-img-element -- signed/blob URLs, not optimisable
         <img src={item.previewUrl} alt="" className="size-full object-cover" />
       )}
@@ -206,7 +227,8 @@ function PageRow({ item, onRetry, onDiscard }: { item: Item; onRetry: () => void
           className="flex items-center gap-4 rounded-2xl border border-line bg-card p-3 active:bg-sunken"
         >
           {thumb}
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
+            {item.name && <p className="truncate text-xs text-muted">{item.name}</p>}
             <p>{item.count === 0 ? "No words found" : `${item.count} ${item.count === 1 ? "word" : "words"} found`}</p>
             <p className="text-sm text-accent">Review and save</p>
           </div>
@@ -220,6 +242,7 @@ function PageRow({ item, onRetry, onDiscard }: { item: Item; onRetry: () => void
     <li className="flex items-center gap-4 rounded-2xl border border-line bg-card p-3">
       {thumb}
       <div className="min-w-0 flex-1">
+        {item.name && <p className="truncate text-xs text-muted">{item.name}</p>}
         {item.status === "failed" ? (
           <p className="flex items-start gap-1.5 text-sm text-danger">
             <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden />

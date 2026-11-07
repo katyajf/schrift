@@ -39,6 +39,8 @@ export type UserSettingsRow = {
 export type PageRow = {
   id: string;
   user_id: string;
+  title: string | null;
+  lesson_date: string;
   storage_path: string;
   source: "photo" | "pdf";
   status: PageStatus;
@@ -83,11 +85,13 @@ export type ExampleSentenceRow = {
   created_at: string;
 };
 
+export type CardKind = "recognise" | "produce" | "article";
+
 export type CardRow = {
   id: string;
   user_id: string;
   entry_id: string;
-  kind: "recognise" | "produce";
+  kind: CardKind;
   due: string;
   stability: number;
   difficulty: number;
@@ -176,6 +180,18 @@ export type Database = {
         Row: { entry_id: string; times_learned: number; times_practised: number; last_practised: string | null };
         Relationships: [];
       };
+      set_overview: {
+        Row: {
+          id: string;
+          title: string | null;
+          lesson_date: string;
+          source: "photo" | "pdf";
+          created_at: string;
+          words: number;
+          words_learned: number;
+        };
+        Relationships: [];
+      };
     };
     Functions: {
       match_existing_entries: {
@@ -205,8 +221,8 @@ export type Database = {
           studied_today: boolean;
         }[];
       };
-      lesson_cards: { Args: { p_size?: number }; Returns: CardRow[] };
-      random_new_cards: { Args: { p_exclude: string[]; p_limit?: number }; Returns: CardRow[] };
+      lesson_cards: { Args: { p_size?: number; p_page_id?: string }; Returns: CardRow[] };
+      random_new_cards: { Args: { p_exclude: string[]; p_limit?: number; p_page_id?: string }; Returns: CardRow[] };
       eligible_new_cards: { Args: Record<string, never>; Returns: CardRow[] };
     };
     Enums: { [_ in never]: never };

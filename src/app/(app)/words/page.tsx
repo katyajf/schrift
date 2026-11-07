@@ -7,6 +7,7 @@ import type { WordType } from "@/lib/database.types";
 import { DutchTerm } from "@/components/dutch-term";
 import { PlayButton } from "@/components/play-button";
 import { WordsToolbar, WordsToolbarSkeleton, type WordFilters } from "./words-toolbar";
+import { LibraryTabs } from "./library-tabs";
 
 
 export const metadata = { title: "Words" };
@@ -38,6 +39,7 @@ export default function WordsPage({ searchParams }: PageProps<"/words">) {
   return (
     <main className="flex flex-1 flex-col">
       <div className="sticky top-0 z-10 bg-paper/95 px-5 pt-[max(1.5rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
+        <LibraryTabs active="words" />
         <Suspense fallback={<WordsToolbarSkeleton />}>
           <Toolbar />
         </Suspense>
@@ -52,8 +54,11 @@ export default function WordsPage({ searchParams }: PageProps<"/words">) {
 // Doesn't read searchParams, so typing in the search box never remounts it.
 async function Toolbar() {
   const { supabase } = await requireUser();
-  const { data: tags } = await supabase.from("tags").select("id, name").order("name");
-  return <WordsToolbar tags={tags ?? []} />;
+  const [{ data: tags }, { data: sets }] = await Promise.all([
+    supabase.from("tags").select("id, name").order("name"),
+    supabase.from("pages").select("id, title").eq("status", "saved"),
+  ]);
+  return <WordsToolbar tags={tags ?? []} sets={sets ?? []} />;
 }
 
 async function WordList({ searchParams }: { searchParams: SearchParams }) {

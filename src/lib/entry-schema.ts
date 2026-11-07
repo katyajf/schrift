@@ -120,9 +120,16 @@ export const SaveEntrySchema = z.object({
 });
 export type SaveEntry = z.infer<typeof SaveEntrySchema>;
 
+// A set: the name and lesson date of one scanned photo or imported PDF.
+export const SetDetailsSchema = z.object({
+  title: z.string().trim().min(1, "Give this set a name").max(120),
+  lessonDate: z.iso.date("Pick a date"),
+});
+
 export const SavePageSchema = z.object({
   pageId: z.uuid(),
   entries: z.array(SaveEntrySchema).max(200),
+  set: SetDetailsSchema,
 });
 
 // Editing a saved entry from the word detail screen.

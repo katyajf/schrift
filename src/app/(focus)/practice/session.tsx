@@ -7,11 +7,12 @@ import { AiBadge, DutchTerm } from "@/components/dutch-term";
 import { PlayButton } from "@/components/play-button";
 import { fromFsrsCard, Rating, scheduler, toFsrsCard, type CardFields, type Grade } from "@/lib/fsrs";
 import { requeuePosition } from "@/lib/lesson";
-import type { Article, Auxiliary, WordType } from "@/lib/database.types";
+import { articleRule, PLURAL_RULE } from "@/lib/articles";
+import type { Article, Auxiliary, CardKind, WordType } from "@/lib/database.types";
 import { gradeCard, loadLesson, loadNewCards } from "./actions";
 
 export type SessionItem = {
-  card: CardFields & { id: string; kind: "recognise" | "produce" };
+  card: CardFields & { id: string; kind: CardKind };
   entry: {
     id: string;
     dutch: string;
@@ -36,12 +37,26 @@ const SWIPE_THRESHOLD = 80;
 //   Still learning  -> "Again": it comes back a few cards later in this lesson,
 //                      and sooner on later days
 // Swipe right for Got it, left for Still learning.
-export function Session({ items, streak, studiedToday }: { items: SessionItem[]; streak: number; studiedToday: boolean }) {
+//
+// "de of het?" cards are answered by tapping de or het instead: right counts as
+// Got it, wrong as Still learning, and the rule behind the answer is shown.
+export function Session({
+  items,
+  streak,
+  studiedToday,
+  setId = null,
+}: {
+  items: SessionItem[];
+  streak: number;
+  studiedToday: boolean;
+  setId?: string | null;
+}) {
   // queue[0] is the card on screen; missed cards are put back further down.
   const [queue, setQueue] = useState(items);
   const [lessonSize, setLessonSize] = useState(items.length);
   const [lessonNumber, setLessonNumber] = useState(1);
   const [revealed, setRevealed] = useState(false);
+  const [choice, setChoice] = useState<Article | null>(null); // for de/het cards
   const [phase, setPhase] = useState<"cards" | "saving" | "summary">("cards");
   const [tally, setTally] = useState({ gotIt: 0, missedWords: new Set<string>(), newWords: new Set<string>() });
   const [saveFailed, setSaveFailed] = useState(0);
@@ -54,6 +69,8 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
   const failed = useRef<GradeInput[]>([]);
   const seenCardIds = useRef(new Set(items.map((i) => i.card.id)));
   const current = queue[0];
+  const isArticleCard = current?.card.kind === "article";
+  const articleCorrect = choice !== null && choice === current?.entry.article;
   const remainingCards = new Set(queue.map((i) => i.card.id)).size;
   const done = lessonSize - remainingCards;
 
@@ -130,6 +147,7 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
       setTimeout(() => {
         setQueue(rest);
         setRevealed(false);
+        setChoice(null);
         setDragX(0);
         setSettling(false);
         if (rest.length === 0) finish();
@@ -137,6 +155,12 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
     },
     [current, queue, save, settling, finish],
   );
+
+  function chooseArticle(article: Article) {
+    if (choice || settling) return;
+    setChoice(article);
+    setRevealed(true);
+  }
 
   // --- Swipe ------------------------------------------------------------------
 
@@ -146,6 +170,7 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
   const swipeHandlers = {
     onPointerDown(event: React.PointerEvent<HTMLElement>) {
       if (settling || (event.pointerType === "mouse" && event.button !== 0)) return;
+      if (isArticleCard && !choice) return; // pick de or het first
       drag.current = { x: event.clientX, y: event.clientY, id: event.pointerId, horizontal: null };
     },
     onPointerMove(event: React.PointerEvent<HTMLElement>) {
@@ -170,7 +195,9 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
       if (!d?.horizontal) return;
       suppressTap.current = true; // the click after a swipe shouldn't flip the card
       setTimeout(() => (suppressTap.current = false), 50);
-      if (dragX >= SWIPE_THRESHOLD) answer(true);
+      // A de/het card is already marked; either direction moves on.
+      if (isArticleCard && Math.abs(dragX) >= SWIPE_THRESHOLD) answer(articleCorrect);
+      else if (dragX >= SWIPE_THRESHOLD) answer(true);
       else if (dragX <= -SWIPE_THRESHOLD) answer(false);
       else setDragX(0);
     },
@@ -182,8 +209,9 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
   };
 
   const tapFlip = useCallback(() => {
-    if (!suppressTap.current) flip();
-  }, [flip]);
+    if (suppressTap.current || (isArticleCard && !choice)) return;
+    flip();
+  }, [flip, isArticleCard, choice]);
 
   // Space flips; → got it, ← still learning (for a laptop keyboard).
   useEffect(() => {
@@ -191,6 +219,15 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
       if (phase !== "cards" || !current || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
       const target = event.target;
       if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable=true]")) return;
+      if (isArticleCard) {
+        // d / h to answer, then Enter or → to continue.
+        if (!choice && (event.key === "d" || event.key === "h")) chooseArticle(event.key === "d" ? "de" : "het");
+        else if (choice && (event.key === "Enter" || event.key === "ArrowRight" || event.key === " ")) {
+          event.preventDefault();
+          answer(articleCorrect);
+        }
+        return;
+      }
       if (event.key === "ArrowRight") {
         event.preventDefault();
         answer(true);
@@ -204,7 +241,8 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase, current, answer, flip]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chooseArticle only reads state listed here
+  }, [phase, current, answer, flip, isArticleCard, choice, articleCorrect]);
 
   // --- Next lesson ------------------------------------------------------------
 
@@ -215,6 +253,7 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
     setLessonNumber((n) => n + 1);
     setTally({ gotIt: 0, missedWords: new Set(), newWords: new Set() });
     setRevealed(false);
+    setChoice(null);
     setNextMessage(null);
     startedAt.current = 0;
     setPhase("cards");
@@ -225,7 +264,7 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
     setNextMessage(null);
     try {
       await saveChain.current; // so the new lesson sees today's answers
-      const result = await loadLesson();
+      const result = await loadLesson({ setId });
       if ("error" in result) return setNextMessage(result.error);
       if (!result.items.length) return setNextMessage("Nothing left to practise. Scan more pages to add words.");
       startLesson(result.items);
@@ -240,7 +279,7 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
     setLoadingNext("words");
     setNextMessage(null);
     try {
-      const result = await loadNewCards({ exclude: [...seenCardIds.current], count: 10 });
+      const result = await loadNewCards({ exclude: [...seenCardIds.current], count: 10, setId });
       if ("error" in result) return setNextMessage(result.error);
       if (!result.items.length) return setNextMessage("No new words left. Scan another notebook page to add more.");
       startLesson(result.items);
@@ -290,7 +329,9 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
           <span className="tabular-nums" aria-live="polite">
             {remainingCards} to go
           </span>
-          {current.card.state === 0 && <span className="rounded-full bg-accent-soft px-2 py-0.5 text-ink">New word</span>}
+          {current.card.state === 0 && !isArticleCard && (
+            <span className="rounded-full bg-accent-soft px-2 py-0.5 text-ink">New word</span>
+          )}
           <button type="button" onClick={finish} className="-mr-2 flex size-10 items-center justify-center" aria-label="End lesson">
             <X className="size-5" aria-hidden />
           </button>
@@ -306,6 +347,7 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
         key={`${current.card.id}-${current.card.reps}`}
         item={current}
         revealed={revealed}
+        choice={choice}
         onFlip={tapFlip}
         dragX={dragX}
         dragging={dragging}
@@ -313,14 +355,29 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
       />
 
       <div className="sticky bottom-0 bg-paper px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-        <div className="grid grid-cols-2 gap-3">
-          <button type="button" className="btn-secondary min-h-14 text-ink" onClick={() => answer(false)} disabled={settling}>
-            <RotateCcw className="size-4" aria-hidden /> Still learning
+        {isArticleCard && !choice ? (
+          <div className="grid grid-cols-2 gap-3" role="group" aria-label="de or het">
+            <button type="button" onClick={() => chooseArticle("de")} className="min-h-16 rounded-2xl border-2 border-de bg-de-soft font-dutch text-2xl text-de active:scale-[0.99]">
+              de
+            </button>
+            <button type="button" onClick={() => chooseArticle("het")} className="min-h-16 rounded-2xl border-2 border-het bg-het-soft font-dutch text-2xl text-het active:scale-[0.99]">
+              het
+            </button>
+          </div>
+        ) : isArticleCard ? (
+          <button type="button" className="btn-primary min-h-14" onClick={() => answer(articleCorrect)} disabled={settling}>
+            Next
           </button>
-          <button type="button" className="btn-secondary min-h-14 border-accent text-accent" onClick={() => answer(true)} disabled={settling}>
-            <Check className="size-5" aria-hidden /> Got it
-          </button>
-        </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <button type="button" className="btn-secondary min-h-14 text-ink" onClick={() => answer(false)} disabled={settling}>
+              <RotateCcw className="size-4" aria-hidden /> Still learning
+            </button>
+            <button type="button" className="btn-secondary min-h-14 border-accent text-accent" onClick={() => answer(true)} disabled={settling}>
+              <Check className="size-5" aria-hidden /> Got it
+            </button>
+          </div>
+        )}
       </div>
     </main>
   );
@@ -329,6 +386,7 @@ export function Session({ items, streak, studiedToday }: { items: SessionItem[];
 function CardFace({
   item,
   revealed,
+  choice,
   onFlip,
   dragX,
   dragging,
@@ -336,6 +394,7 @@ function CardFace({
 }: {
   item: SessionItem;
   revealed: boolean;
+  choice: Article | null;
   onFlip: () => void;
   dragX: number;
   dragging: boolean;
@@ -343,6 +402,18 @@ function CardFace({
 }) {
   const { entry, card, example } = item;
   const spoken = entry.article ? `${entry.article} ${entry.dutch}` : entry.dutch;
+  if (card.kind === "article" && entry.article) {
+    return (
+      <ArticleCardFace
+        entry={entry}
+        article={entry.article}
+        choice={choice}
+        dragX={dragX}
+        dragging={dragging}
+        swipeHandlers={swipeHandlers}
+      />
+    );
+  }
   const showDutch = (card.kind === "recognise") !== revealed;
   const flipLabel = showDutch ? "Show meaning" : "Show Dutch word";
   // How far the swipe is towards an answer, 0..1, to fade in its label.
@@ -427,6 +498,77 @@ function CardFace({
             {revealed ? "Tap to flip back" : "Tap to check"} · swipe right if you knew it
           </p>
         </div>
+      </div>
+    </section>
+  );
+}
+
+// "___ huis — de or het?" Answered with the buttons below the card.
+function ArticleCardFace({
+  entry,
+  article,
+  choice,
+  dragX,
+  dragging,
+  swipeHandlers,
+}: {
+  entry: SessionItem["entry"];
+  article: Article;
+  choice: Article | null;
+  dragX: number;
+  dragging: boolean;
+  swipeHandlers: React.HTMLAttributes<HTMLElement>;
+}) {
+  const correct = choice === article;
+  const rule = articleRule(entry.dutch, article);
+  return (
+    <section aria-label="de or het" className="flex flex-1 overflow-x-clip px-5 py-4">
+      <div
+        {...swipeHandlers}
+        className={`relative flex min-h-64 min-w-0 flex-1 animate-[card-in_200ms_ease-out] flex-col rounded-3xl border bg-card p-6 ${
+          !choice ? "border-line" : correct ? "border-accent" : "border-warn"
+        }`}
+        style={{
+          touchAction: "pan-y",
+          transform: dragX ? `translateX(${dragX}px) rotate(${Math.max(-4, Math.min(4, dragX / 40))}deg)` : undefined,
+          transition: dragging ? "none" : "transform 180ms ease-out, opacity 180ms ease-out",
+          opacity: dragX ? Math.max(0.3, 1 - Math.abs(dragX) / 500) : undefined,
+        }}
+      >
+        <div className="flex items-center justify-between text-xs tracking-wide text-muted">
+          <span>de of het?</span>
+          <span>{entry.english}</span>
+        </div>
+        <div className="flex flex-1 flex-col justify-center py-8" aria-live="polite">
+          <div className="flex items-start gap-2">
+            <h1 className="min-w-0 font-dutch text-[2.5rem] leading-[1.15] break-words">
+              {choice ? (
+                <span className={article === "de" ? "text-de" : "text-het"}>{article}</span>
+              ) : (
+                <span className="text-line-strong">___</span>
+              )}{" "}
+              {entry.dutch}
+            </h1>
+            {choice && (
+              <PlayButton text={`${article} ${entry.dutch}`} className="mt-1" />
+            )}
+          </div>
+          {choice && (
+            <div className="mt-6 border-t border-line pt-5">
+              <p className={`flex items-center gap-1.5 ${correct ? "text-accent" : "text-warn"}`}>
+                {correct ? <Check className="size-4" aria-hidden /> : <RotateCcw className="size-4" aria-hidden />}
+                {correct ? "Right" : `It's ${article} ${entry.dutch}`}
+              </p>
+              {rule && <p className="mt-3 text-sm">{rule}</p>}
+              {entry.plural && (
+                <p className="mt-3 font-dutch text-sm text-muted">
+                  <span className="text-de">de</span> {entry.plural} · {PLURAL_RULE}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+        <p className="text-center text-xs text-muted">{choice ? "Next, or swipe either way" : "Pick de or het below"}</p>
       </div>
     </section>
   );
