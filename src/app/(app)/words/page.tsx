@@ -8,6 +8,7 @@ import { DutchTerm } from "@/components/dutch-term";
 import { PlayButton } from "@/components/play-button";
 import { WordsToolbar, WordsToolbarSkeleton, type WordFilters } from "./words-toolbar";
 import { LibraryTabs } from "./library-tabs";
+import { AddWord } from "./add-word";
 
 
 export const metadata = { title: "Words" };
@@ -44,6 +45,7 @@ export default function WordsPage({ searchParams }: PageProps<"/words">) {
           <Toolbar />
         </Suspense>
       </div>
+      <AddWord />
       <Suspense fallback={<ListSkeleton />}>
         <WordList searchParams={searchParams} />
       </Suspense>
