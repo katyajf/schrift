@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { refresh } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
-import { EditEntrySchema, FILLABLE_FIELDS } from "@/lib/entry-schema";
+import { AddWordSchema, EditEntrySchema, FILLABLE_FIELDS } from "@/lib/entry-schema";
 import type { Json } from "@/lib/database.types";
 
 const id = z.uuid();
@@ -42,6 +42,34 @@ export async function updateEntry(entryId: string, input: unknown): Promise<{ er
     .eq("id", entryId);
   if (error) return { error: "Couldn't save your changes." };
   refresh();
+}
+
+// Add one hand-typed word. Safe to call twice with the same id (a retry after a
+// dropped connection): the second insert hits the primary key and counts as done.
+export async function addWord(input: unknown): Promise<{ error: string } | { ok: true }> {
+  const parsed = AddWordSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the word." };
+  const { supabase } = await requireUser();
+
+  let { dutch, article } = parsed.data;
+  const { id: entryId, english, word_type } = parsed.data;
+  // The article has its own column, so "de appel" is stored as "appel".
+  const match = dutch.match(/^(de|het)\s+(.+)$/i);
+  if (match && word_type === "noun") {
+    dutch = match[2];
+    article = article ?? (match[1].toLowerCase() as "de" | "het");
+  }
+
+  const { error } = await supabase.from("entries").insert({
+    id: entryId,
+    dutch,
+    english,
+    word_type,
+    article: word_type === "noun" ? article : null,
+  });
+  if (error && error.code !== "23505") return { error: "Couldn't save that word." };
+  refresh();
+  return { ok: true };
 }
 
 export async function deleteEntry(entryId: string) {

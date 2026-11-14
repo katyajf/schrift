@@ -136,3 +136,14 @@ export const SavePageSchema = z.object({
 export const EditEntrySchema = SaveEntrySchema.omit({ examples: true, field_sources: true, merge_into: true }).extend({
   notes: z.preprocess(blankToNull, z.string().trim().max(1000).nullable()),
 });
+
+// A single word typed in by hand. The id is made on the device so a word queued
+// offline can be sent again after a dropped connection without being added twice.
+export const AddWordSchema = z.object({
+  id: z.uuid(),
+  dutch: z.string().trim().min(1, "Type a Dutch word first").max(200),
+  english: z.string().trim().max(300),
+  article: z.preprocess(blankToNull, z.enum(ARTICLES).nullable()),
+  word_type: z.enum(WORD_TYPES),
+});
+export type AddWordInput = z.input<typeof AddWordSchema>;
